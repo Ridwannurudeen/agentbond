@@ -60,7 +60,7 @@ def main():
 
     # Note: This assumes contracts have been compiled via Hardhat
     # and ABIs are available in contracts/artifacts/
-    artifacts_dir = CONTRACTS_DIR / "artifacts" / "contracts"
+    artifacts_dir = CONTRACTS_DIR / "artifacts" / "src"
 
     contracts_to_deploy = [
         ("AgentRegistry", [RESOLVER_ADDRESS]),

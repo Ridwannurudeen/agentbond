@@ -31,8 +31,9 @@ async def execute_run(
     agent = await db.get(Agent, agent_id)
     if not agent:
         raise ValueError(f"Agent {agent_id} not found")
-    if agent.status != "active":
-        raise ValueError(f"Agent {agent_id} is not active (status: {agent.status})")
+    status_val = agent.status.value if hasattr(agent.status, 'value') else str(agent.status)
+    if status_val != "active":
+        raise ValueError(f"Agent {agent_id} is not active (status: {status_val})")
 
     # Fetch active policy
     policy_result = await db.execute(

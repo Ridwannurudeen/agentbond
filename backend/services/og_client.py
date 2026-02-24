@@ -45,9 +45,9 @@ class OGExecutionClient:
             self._client = og.init(private_key=self.private_key)
             self._initialized = True
             logger.info("OpenGradient SDK initialized")
-        except ImportError:
+        except Exception as e:
             logger.warning(
-                "OpenGradient SDK not installed. Running in mock mode."
+                f"OpenGradient SDK unavailable ({e}). Running in mock mode."
             )
             self._client = None
             self._initialized = True

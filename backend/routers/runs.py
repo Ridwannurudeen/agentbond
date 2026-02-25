@@ -16,6 +16,7 @@ class ExecuteRunRequest(BaseModel):
     agent_id: int
     user_input: str
     user_address: str | None = None
+    simulate_tools: list[dict] | None = None
 
 
 @router.post("")
@@ -27,6 +28,7 @@ async def create_run(req: ExecuteRunRequest, db: AsyncSession = Depends(get_db))
             agent_id=req.agent_id,
             user_input=req.user_input,
             user_address=req.user_address,
+            simulate_tools=req.simulate_tools,
         )
         return result
     except ValueError as e:

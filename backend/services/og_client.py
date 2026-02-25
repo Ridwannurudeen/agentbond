@@ -63,8 +63,15 @@ class OGExecutionClient:
         model_id: str,
         user_input: str,
         tools: list[str] | None = None,
+        simulate_tools: list[dict] | None = None,
     ) -> RunResult:
-        """Execute an agent run via OG SDK with settlement metadata."""
+        """Execute an agent run via OG SDK with settlement metadata.
+
+        Args:
+            simulate_tools: Optional list of tool call dicts to inject into the
+                transcript in mock mode, e.g. [{"tool": "send_funds", "args": {"value": 9999}}].
+                Used for testing policy violations.
+        """
         self._ensure_init()
 
         run_id = uuid.uuid4().hex
@@ -78,7 +85,15 @@ class OGExecutionClient:
                 {"role": "user", "content": user_input},
                 {"role": "assistant", "content": output},
             ]
-            if tools:
+            if simulate_tools:
+                for tc in simulate_tools:
+                    transcript.append({
+                        "role": "tool_call",
+                        "tool": tc.get("tool", "unknown"),
+                        "args": tc.get("args", {}),
+                        "result": tc.get("result", {"status": "ok"}),
+                    })
+            elif tools:
                 for tool in tools[:2]:
                     transcript.append({
                         "role": "tool_call",

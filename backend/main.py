@@ -3,11 +3,16 @@
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.db import init_db
+from backend.db import init_db, get_db
 from backend.routers import agents, runs, claims, policies, scores
+from backend.middleware import RateLimitMiddleware
+from backend.auth import generate_api_key
+from backend.models.schema import Operator
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -28,6 +33,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+app.add_middleware(RateLimitMiddleware, requests_per_minute=120)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -46,6 +52,30 @@ app.include_router(scores.router)
 @app.get("/api/health")
 async def health():
     return {"status": "ok", "service": "agentbond"}
+
+
+@app.post("/api/operators/{wallet_address}/api-key")
+async def generate_operator_api_key(
+    wallet_address: str, db: AsyncSession = Depends(get_db)
+):
+    """Generate a new API key for an operator."""
+    result = await db.execute(
+        select(Operator).where(Operator.wallet_address == wallet_address)
+    )
+    operator = result.scalar_one_or_none()
+    if not operator:
+        from fastapi import HTTPException
+        raise HTTPException(404, "Operator not found")
+
+    key = generate_api_key()
+    operator.api_key = key
+    await db.commit()
+
+    return {
+        "operator_id": operator.id,
+        "wallet_address": operator.wallet_address,
+        "api_key": key,
+    }
 
 
 @app.get("/api/dashboard/stats")

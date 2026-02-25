@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.models.schema import Agent, Run, Policy
-from backend.services.og_client import OGExecutionClient, RunResult
+from backend.services.og_client import OGExecutionClient, RunResult, DEFAULT_MODEL
 from backend.services.policy_engine import evaluate_policy
 from backend.config import settings
 
@@ -46,8 +46,8 @@ async def execute_run(
     policy = policy_result.scalar_one_or_none()
     policy_rules = policy.rules_json if policy else {}
 
-    # Determine model from metadata
-    model_id = "meta-llama/llama-3.1-8b"  # default
+    # Determine model from metadata or use default
+    model_id = DEFAULT_MODEL
 
     # Execute via OG SDK
     run_result: RunResult = await og_client.execute_agent_run(

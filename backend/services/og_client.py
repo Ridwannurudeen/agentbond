@@ -40,6 +40,12 @@ class OGExecutionClient:
     def _ensure_init(self):
         if self._initialized:
             return
+        # Skip SDK init if no valid private key (avoids blocking RPC calls)
+        if not self.private_key or not self.private_key.startswith("0x") or len(self.private_key) < 66:
+            logger.warning("No valid OG private key configured. Running in mock mode.")
+            self._client = None
+            self._initialized = True
+            return
         try:
             import opengradient as og
             self._client = og.init(private_key=self.private_key)

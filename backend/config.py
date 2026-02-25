@@ -2,8 +2,8 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    database_url: str = "postgresql+asyncpg://agentbond:agentbond@localhost:5432/agentbond"
-    database_url_sync: str = "postgresql://agentbond:agentbond@localhost:5432/agentbond"
+    database_url: str = "sqlite+aiosqlite:///agentbond.db"
+    database_url_sync: str = "sqlite:///agentbond.db"
 
     og_private_key: str = ""
     og_rpc_url: str = "https://testnet-rpc.opengradient.ai"

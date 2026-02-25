@@ -258,9 +258,13 @@ describe("AgentBond Contracts", function () {
     });
 
     it("should emit Ping event", async function () {
-      await expect(heartbeat.connect(operator).ping(1))
+      const tx = await heartbeat.connect(operator).ping(1);
+      const receipt = await tx.wait();
+      const block = await ethers.provider.getBlock(receipt.blockNumber);
+
+      await expect(tx)
         .to.emit(heartbeat, "Ping")
-        .withArgs(1, operator.address, await getBlockTimestamp());
+        .withArgs(1, operator.address, block.timestamp);
     });
 
     it("should report not alive for unpinged agent", async function () {
@@ -319,8 +323,3 @@ describe("AgentBond Contracts", function () {
     });
   });
 });
-
-async function getBlockTimestamp() {
-  const block = await ethers.provider.getBlock("latest");
-  return block.timestamp;
-}

@@ -12,8 +12,8 @@ from solcx import compile_standard, install_solc
 
 load_dotenv()
 
-RPC_URL = os.getenv("OG_RPC_URL", "https://testnet-rpc.opengradient.ai")
-CHAIN_ID = int(os.getenv("CHAIN_ID", "131072"))
+RPC_URL = os.getenv("OG_RPC_URL", "https://ogevmdevnet.opengradient.ai")
+CHAIN_ID = int(os.getenv("CHAIN_ID", "10740"))
 PRIVATE_KEY = os.getenv("DEPLOYER_PRIVATE_KEY", "")
 RESOLVER_ADDRESS = os.getenv("RESOLVER_ADDRESS", "")
 

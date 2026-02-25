@@ -8,7 +8,7 @@ On-chain warranty layer on OpenGradient where operators stake collateral, agent 
 - **Backend** (FastAPI): Agent orchestration, policy engine, claim verification, reputation scoring
 - **Frontend** (React): Unified dashboard for operators and users
 - **CLI** (Click): Operator management tool
-- **Chain**: OpenGradient Testnet (ChainID: 131072)
+- **Chain**: OpenGradient Testnet (ChainID: 10740, RPC: https://ogevmdevnet.opengradient.ai)
 
 ## Quick Start
 

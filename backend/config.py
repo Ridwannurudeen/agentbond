@@ -6,8 +6,8 @@ class Settings(BaseSettings):
     database_url_sync: str = "sqlite:///agentbond.db"
 
     og_private_key: str = ""
-    og_rpc_url: str = "https://testnet-rpc.opengradient.ai"
-    chain_id: int = 131072
+    og_rpc_url: str = "https://ogevmdevnet.opengradient.ai"
+    chain_id: int = 10740
 
     # Deployed contract addresses (set after deployment)
     agent_registry_address: str = ""

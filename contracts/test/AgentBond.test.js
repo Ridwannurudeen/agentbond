@@ -241,4 +241,86 @@ describe("AgentBond Contracts", function () {
       ).to.be.revertedWith("Not resolver");
     });
   });
+
+  describe("Heartbeat", function () {
+    let heartbeat;
+
+    beforeEach(async function () {
+      const Heartbeat = await ethers.getContractFactory("Heartbeat");
+      heartbeat = await Heartbeat.deploy();
+    });
+
+    it("should record a ping", async function () {
+      await heartbeat.connect(operator).ping(1);
+      const status = await heartbeat.getStatus(1);
+      expect(status.alive).to.be.true;
+      expect(status.pinger).to.equal(operator.address);
+    });
+
+    it("should emit Ping event", async function () {
+      await expect(heartbeat.connect(operator).ping(1))
+        .to.emit(heartbeat, "Ping")
+        .withArgs(1, operator.address, await getBlockTimestamp());
+    });
+
+    it("should report not alive for unpinged agent", async function () {
+      expect(await heartbeat.isAlive(999)).to.be.false;
+    });
+
+    it("should report alive within threshold", async function () {
+      await heartbeat.connect(operator).ping(1);
+      expect(await heartbeat.isAlive(1)).to.be.true;
+    });
+
+    it("should report not alive after threshold", async function () {
+      await heartbeat.connect(operator).ping(1);
+
+      // Advance time by 1 hour + 1 second
+      await ethers.provider.send("evm_increaseTime", [3601]);
+      await ethers.provider.send("evm_mine");
+
+      expect(await heartbeat.isAlive(1)).to.be.false;
+    });
+
+    it("should track multiple agents independently", async function () {
+      await heartbeat.connect(operator).ping(1);
+      await heartbeat.connect(user).ping(2);
+
+      const status1 = await heartbeat.getStatus(1);
+      const status2 = await heartbeat.getStatus(2);
+
+      expect(status1.pinger).to.equal(operator.address);
+      expect(status2.pinger).to.equal(user.address);
+      expect(status1.alive).to.be.true;
+      expect(status2.alive).to.be.true;
+    });
+
+    it("should return max age for unpinged agent", async function () {
+      const status = await heartbeat.getStatus(999);
+      expect(status.alive).to.be.false;
+      expect(status.lastPingTime).to.equal(0);
+      // age should be type(uint256).max
+      expect(status.age).to.equal(ethers.MaxUint256);
+    });
+
+    it("should update lastPing on re-ping", async function () {
+      await heartbeat.connect(operator).ping(1);
+      const status1 = await heartbeat.getStatus(1);
+
+      // Advance time
+      await ethers.provider.send("evm_increaseTime", [600]);
+      await ethers.provider.send("evm_mine");
+
+      await heartbeat.connect(operator).ping(1);
+      const status2 = await heartbeat.getStatus(1);
+
+      expect(status2.lastPingTime).to.be.gt(status1.lastPingTime);
+      expect(status2.alive).to.be.true;
+    });
+  });
 });
+
+async function getBlockTimestamp() {
+  const block = await ethers.provider.getBlock("latest");
+  return block.timestamp;
+}

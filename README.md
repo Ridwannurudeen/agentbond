@@ -4,7 +4,7 @@ On-chain warranty layer on OpenGradient where operators stake collateral, agent 
 
 ## Architecture
 
-- **Smart Contracts** (Solidity): AgentRegistry, PolicyRegistry, WarrantyPool, ClaimManager
+- **Smart Contracts** (Solidity): AgentRegistry, PolicyRegistry, WarrantyPool, ClaimManager, Heartbeat
 - **Backend** (FastAPI): Agent orchestration, policy engine, claim verification, reputation scoring
 - **Frontend** (React): Unified dashboard for operators and users
 - **CLI** (Click): Operator management tool
@@ -16,17 +16,8 @@ On-chain warranty layer on OpenGradient where operators stake collateral, agent 
 
 - Python 3.10+
 - Node.js 18+
-- PostgreSQL (or use Docker)
 
-### Option 1: Docker (Recommended)
-
-```bash
-cp .env.example .env
-# Edit .env with your keys
-docker compose up -d
-```
-
-### Option 2: Manual Setup
+### Setup
 
 ```bash
 # Install Python dependencies
@@ -38,10 +29,7 @@ cd frontend && npm install && cd ..
 # Install contract dependencies
 cd contracts && npm install && cd ..
 
-# Start PostgreSQL (or use Docker)
-docker compose up -d postgres
-
-# Run backend
+# Start backend (uses SQLite by default)
 make dev
 
 # In another terminal, run frontend
@@ -55,7 +43,7 @@ make frontend
 make seed
 ```
 
-This creates 3 demo agents with policies and staked collateral.
+Creates 3 demo agents (Finance, Research, Trading) with policies and staked collateral.
 
 ### Run End-to-End Demo
 
@@ -63,17 +51,34 @@ This creates 3 demo agents with policies and staked collateral.
 make demo
 ```
 
-Walks through: register agent -> stake -> execute run -> submit claim -> verify -> check scores.
+Full lifecycle: register agent → strict policy → stake → clean run (pass) → violating run (fail) → claim submission → auto-verification → score degradation.
+
+### Docker (Optional)
+
+```bash
+cp .env.example .env
+# Edit .env with your keys
+docker compose up -d
+```
 
 ## Smart Contracts
+
+5 contracts deployed on OpenGradient testnet:
+
+| Contract | Purpose |
+|----------|---------|
+| `AgentRegistry` | Agent registration, versioning, reputation, operator/resolver access control |
+| `PolicyRegistry` | Policy definitions, activation, deprecation |
+| `WarrantyPool` | Staking (7-day cooldown unstake), slashing, payouts, auto-pause |
+| `ClaimManager` | Claim lifecycle (submit/verify/approve/reject/pay), rate limiting |
+| `Heartbeat` | On-chain liveness proof (1-hour threshold ping/isAlive/getStatus) |
 
 Compile and test:
 
 ```bash
 cd contracts
-npm install
 npx hardhat compile
-npx hardhat test
+npx hardhat test      # 28 tests
 ```
 
 Deploy to OpenGradient testnet:
@@ -86,11 +91,14 @@ python scripts/deploy.py
 
 | Method | Path | Description |
 |--------|------|-------------|
+| GET | `/api/health` | Health check |
 | POST | `/api/agents` | Register agent |
+| GET | `/api/agents` | List agents |
 | GET | `/api/agents/{id}` | Get agent details |
 | POST | `/api/agents/{id}/versions` | Publish version |
 | POST | `/api/agents/{id}/stake` | Stake collateral |
 | POST | `/api/agents/{id}/unstake` | Request unstake |
+| POST | `/api/agents/{id}/webhook` | Configure operator webhook |
 | POST | `/api/policies` | Register policy |
 | GET | `/api/policies/{id}` | Get policy |
 | POST | `/api/policies/{id}/activate` | Activate policy |
@@ -100,7 +108,58 @@ python scripts/deploy.py
 | POST | `/api/claims` | Submit claim |
 | GET | `/api/claims/{id}` | Get claim status |
 | GET | `/api/scores/{agentId}` | Get trust score |
+| GET | `/api/scores` | List all scores |
 | GET | `/api/dashboard/stats` | Global stats |
+| POST | `/api/operators/{wallet}/api-key` | Generate API key |
+
+### Authentication
+
+API key authentication is optional for MVP. Generate a key:
+
+```bash
+curl -X POST http://localhost:8000/api/operators/0xYOUR_WALLET/api-key
+```
+
+Include in requests via `X-API-Key` header:
+
+```bash
+curl -H "X-API-Key: YOUR_KEY" http://localhost:8000/api/agents
+```
+
+### Rate Limiting
+
+120 requests per minute per IP address. Exceeding returns HTTP 429.
+
+### Webhooks
+
+Operators can register a webhook URL to receive notifications for:
+
+- `claim.submitted` — when a claim is filed against their agent
+- `claim.resolved` — when a claim is approved or rejected
+- `score.changed` — when their agent's trust score changes
+
+Configure via:
+
+```bash
+curl -X POST http://localhost:8000/api/agents/{id}/webhook \
+  -H "Content-Type: application/json" \
+  -d '{"webhook_url": "https://your-server.com/hook"}'
+```
+
+## Database Migrations
+
+Uses Alembic for schema migrations:
+
+```bash
+# Generate a new migration after model changes
+python -m alembic revision --autogenerate -m "description"
+
+# Apply migrations
+python -m alembic upgrade head
+
+# Rollback one step
+python -m alembic downgrade -1
+```
 
 ## CLI Usage
 
@@ -142,37 +201,55 @@ agentbond stats
 
 ## Reason Codes
 
-| Code | Description |
-|------|-------------|
-| TOOL_WHITELIST_VIOLATION | Used tool not in policy |
-| VALUE_LIMIT_EXCEEDED | Action exceeded max value |
-| PROHIBITED_TARGET | Interacted with blocked address |
-| FREQUENCY_EXCEEDED | Too many actions in window |
-| STALE_DATA | Data older than freshness requirement |
-| MODEL_MISMATCH | Declared model != executed model |
+| Code | Description | Auto-verifiable |
+|------|-------------|-----------------|
+| TOOL_WHITELIST_VIOLATION | Used tool not in policy | Yes |
+| VALUE_LIMIT_EXCEEDED | Action exceeded max value | Yes |
+| PROHIBITED_TARGET | Interacted with blocked address | Yes |
+| FREQUENCY_EXCEEDED | Too many actions in window | Yes |
+| STALE_DATA | Data older than freshness requirement | Yes |
+| MODEL_MISMATCH | Declared model != executed model | Yes |
 
 ## Testing
 
 ```bash
-# Backend tests
+# All backend tests (74 tests)
 make test
 
-# Contract tests
+# Contract tests (28 tests)
 make contracts-test
+
+# Run specific test file
+python -m pytest tests/test_policy_engine.py -v
 ```
 
 ## Project Structure
 
 ```
 agentbond/
-├── contracts/           # Solidity smart contracts + Hardhat
-├── backend/             # FastAPI application
-│   ├── routers/         # API route handlers
-│   ├── services/        # Business logic (policy engine, orchestrator, etc.)
-│   ├── models/          # SQLAlchemy models
-│   └── contracts/       # Web3 contract interface
-├── frontend/            # React dashboard
-├── cli/                 # Click-based CLI tool
-├── scripts/             # Deploy, seed, demo scripts
-└── tests/               # Python tests
+├── contracts/               # Solidity smart contracts + Hardhat
+│   ├── src/                 # .sol files (AgentRegistry, PolicyRegistry, etc.)
+│   └── test/                # Hardhat tests
+├── backend/                 # FastAPI application
+│   ├── routers/             # API route handlers
+│   ├── services/            # Business logic (policy engine, orchestrator, etc.)
+│   ├── models/              # SQLAlchemy models
+│   ├── contracts/           # Web3 contract interface
+│   ├── auth.py              # API key authentication
+│   ├── middleware.py         # Rate limiting
+│   ├── validation.py        # Input validation utilities
+│   └── config.py            # Settings (DB URL, chain config)
+├── frontend/                # React dashboard (Vite + TypeScript)
+│   └── src/pages/           # Dashboard, AgentDetail, RunDetail, Claims, Operator
+├── cli/                     # Click-based CLI tool
+├── alembic/                 # Database migrations
+├── scripts/                 # Deploy, seed, demo scripts
+├── tests/                   # Python tests
+├── docker-compose.yml       # Full-stack dev setup
+├── Makefile                 # Common commands
+└── pyproject.toml           # Python dependencies
 ```
+
+## License
+
+MIT

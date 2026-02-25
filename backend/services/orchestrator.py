@@ -24,6 +24,7 @@ async def execute_run(
     agent_id: int,
     user_input: str,
     user_address: str | None = None,
+    simulate_tools: list[dict] | None = None,
 ) -> dict:
     """Execute an agent run: call OG SDK, evaluate policy, store results."""
 
@@ -53,6 +54,7 @@ async def execute_run(
         model_id=model_id,
         user_input=user_input,
         tools=policy_rules.get("allowed_tools"),
+        simulate_tools=simulate_tools,
     )
 
     # Evaluate policy

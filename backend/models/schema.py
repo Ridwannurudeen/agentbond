@@ -33,6 +33,8 @@ class Operator(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     wallet_address = Column(String(42), unique=True, nullable=False)
+    webhook_url = Column(Text, nullable=True)
+    api_key = Column(String(64), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     agents = relationship("Agent", back_populates="operator")

@@ -17,6 +17,7 @@ router = APIRouter(prefix="/api/agents", tags=["agents"])
 class RegisterAgentRequest(BaseModel):
     wallet_address: str
     metadata_uri: str
+    webhook_url: str | None = None
 
 
 class PublishVersionRequest(BaseModel):
@@ -45,9 +46,11 @@ async def register_agent(req: RegisterAgentRequest, db: AsyncSession = Depends(g
     )
     operator = result.scalar_one_or_none()
     if not operator:
-        operator = Operator(wallet_address=req.wallet_address)
+        operator = Operator(wallet_address=req.wallet_address, webhook_url=req.webhook_url)
         db.add(operator)
         await db.flush()
+    elif req.webhook_url:
+        operator.webhook_url = req.webhook_url
 
     agent = Agent(
         operator_id=operator.id,
@@ -150,6 +153,33 @@ async def set_agent_status(
 
     await db.commit()
     return {"id": agent_id, "status": agent.status.value}
+
+
+class WebhookConfigRequest(BaseModel):
+    webhook_url: str | None = None
+
+
+@router.post("/{agent_id}/webhook")
+async def configure_webhook(
+    agent_id: int, req: WebhookConfigRequest, db: AsyncSession = Depends(get_db)
+):
+    """Configure webhook URL for the operator of this agent."""
+    agent = await db.get(Agent, agent_id)
+    if not agent:
+        raise HTTPException(404, "Agent not found")
+
+    operator = await db.get(Operator, agent.operator_id)
+    if not operator:
+        raise HTTPException(404, "Operator not found")
+
+    operator.webhook_url = req.webhook_url
+    await db.commit()
+
+    return {
+        "agent_id": agent_id,
+        "operator_id": operator.id,
+        "webhook_url": operator.webhook_url,
+    }
 
 
 @router.post("/{agent_id}/stake")

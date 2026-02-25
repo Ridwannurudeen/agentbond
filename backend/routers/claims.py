@@ -13,6 +13,8 @@ from backend.db import get_db
 from backend.models.schema import Claim, Run, Agent, ClaimStatus
 from backend.services.claim_verifier import verify_claim
 from backend.services.reputation import snapshot_score
+from backend.services.webhooks import notify_claim_submitted, notify_claim_resolved
+from backend.validation import validate_reason_code
 
 router = APIRouter(prefix="/api/claims", tags=["claims"])
 
@@ -28,6 +30,12 @@ class SubmitClaimRequest(BaseModel):
 @router.post("")
 async def submit_claim(req: SubmitClaimRequest, db: AsyncSession = Depends(get_db)):
     """Submit a warranty claim against a run."""
+    # Validate reason code
+    try:
+        validate_reason_code(req.reason_code)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
     # Validate run exists
     result = await db.execute(select(Run).where(Run.run_id == req.run_id))
     run = result.scalar_one_or_none()
@@ -57,6 +65,11 @@ async def submit_claim(req: SubmitClaimRequest, db: AsyncSession = Depends(get_d
     await db.commit()
     await db.refresh(claim)
 
+    # Notify operator of claim submission
+    await notify_claim_submitted(
+        db, req.agent_id, claim.id, req.reason_code, req.run_id
+    )
+
     # Auto-verify
     verification = await verify_claim(db, claim.id)
 
@@ -68,6 +81,11 @@ async def submit_claim(req: SubmitClaimRequest, db: AsyncSession = Depends(get_d
 
         # Update reputation
         await snapshot_score(db, req.agent_id)
+
+    # Notify operator of resolution
+    await notify_claim_resolved(
+        db, req.agent_id, claim.id, verification.approved, verification.reason
+    )
 
     return {
         "claim_id": claim.id,

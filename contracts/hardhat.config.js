@@ -1,6 +1,7 @@
 require("@nomicfoundation/hardhat-toolbox");
 require("dotenv").config({ path: "../.env" });
 
+/** @type import('hardhat/config').HardhatUserConfig */
 module.exports = {
   paths: {
     sources: "./src",
@@ -29,5 +30,23 @@ module.exports = {
         ? [process.env.DEPLOYER_PRIVATE_KEY]
         : [],
     },
+  },
+  etherscan: {
+    apiKey: {
+      baseSepolia: process.env.BASESCAN_API_KEY || "PLACEHOLDER",
+    },
+    customChains: [
+      {
+        network: "baseSepolia",
+        chainId: 84532,
+        urls: {
+          apiURL: "https://api-sepolia.basescan.org/api",
+          browserURL: "https://sepolia.basescan.org",
+        },
+      },
+    ],
+  },
+  sourcify: {
+    enabled: true,
   },
 };

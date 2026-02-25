@@ -8,12 +8,11 @@ from pathlib import Path
 from dotenv import load_dotenv
 from web3 import Web3
 from web3.middleware import ExtraDataToPOAMiddleware
-from solcx import compile_standard, install_solc
 
 load_dotenv()
 
-RPC_URL = os.getenv("OG_RPC_URL", "https://ogevmdevnet.opengradient.ai")
-CHAIN_ID = int(os.getenv("CHAIN_ID", "10740"))
+RPC_URL = os.getenv("DEPLOY_RPC_URL", os.getenv("OG_RPC_URL", "https://sepolia.base.org"))
+CHAIN_ID = int(os.getenv("DEPLOY_CHAIN_ID", os.getenv("CHAIN_ID", "84532")))
 PRIVATE_KEY = os.getenv("DEPLOYER_PRIVATE_KEY", "")
 RESOLVER_ADDRESS = os.getenv("RESOLVER_ADDRESS", "")
 
@@ -26,11 +25,17 @@ def get_w3():
     return w3
 
 
+nonce_tracker = {"nonce": None}
+
+
 def deploy_contract(w3, account, abi, bytecode, *constructor_args):
+    if nonce_tracker["nonce"] is None:
+        nonce_tracker["nonce"] = w3.eth.get_transaction_count(account.address)
+
     contract = w3.eth.contract(abi=abi, bytecode=bytecode)
     tx = contract.constructor(*constructor_args).build_transaction({
         "from": account.address,
-        "nonce": w3.eth.get_transaction_count(account.address),
+        "nonce": nonce_tracker["nonce"],
         "gas": 3_000_000,
         "gasPrice": w3.eth.gas_price,
         "chainId": CHAIN_ID,
@@ -38,6 +43,7 @@ def deploy_contract(w3, account, abi, bytecode, *constructor_args):
     signed = account.sign_transaction(tx)
     tx_hash = w3.eth.send_raw_transaction(signed.raw_transaction)
     receipt = w3.eth.wait_for_transaction_receipt(tx_hash)
+    nonce_tracker["nonce"] += 1
     print(f"  Deployed at: {receipt.contractAddress} (tx: {tx_hash.hex()})")
     return receipt.contractAddress
 
@@ -121,11 +127,12 @@ def main():
     )
     tx = wp_contract.functions.setClaimManager(deployed["ClaimManager"]).build_transaction({
         "from": account.address,
-        "nonce": w3.eth.get_transaction_count(account.address),
+        "nonce": nonce_tracker["nonce"],
         "gas": 100_000,
         "gasPrice": w3.eth.gas_price,
         "chainId": CHAIN_ID,
     })
+    nonce_tracker["nonce"] += 1
     signed = account.sign_transaction(tx)
     tx_hash = w3.eth.send_raw_transaction(signed.raw_transaction)
     w3.eth.wait_for_transaction_receipt(tx_hash)

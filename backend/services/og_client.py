@@ -355,7 +355,8 @@ class OGExecutionClient:
                 tool_call_entries = _extract_tool_calls(chat_output)
                 transcript.extend(tool_call_entries)
 
-            settlement_tx = result.transaction_hash
+            # payment_hash is the x402 on-chain receipt; transaction_hash is always "external"
+            settlement_tx = result.payment_hash or result.transaction_hash
             model_cid = model_id  # Use the input model_id for consistency
 
             logger.info(f"OG inference complete: run={run_id}, tx={settlement_tx}, "
@@ -424,15 +425,23 @@ class OGExecutionClient:
             input_hash=input_hash,
             output_hash=output_hash,
             transcript=transcript,
-            settlement_tx=f"0x{'ab' * 32}",
+            settlement_tx="external",  # mock: no real on-chain settlement
             model_cid=model_id,
             raw_output=output,
         )
 
     async def verify_proof(self, run_id: str, settlement_tx: str) -> ProofVerification:
-        """Re-fetch settlement data and verify hashes match."""
+        """Verify run proof by checking the x402 settlement transaction on Base Sepolia.
+
+        The OG TEE LLM returns a payment_hash (x402 on-chain receipt on Base Sepolia).
+        We verify this transaction exists and succeeded — TEE hardware guarantees the
+        input/output integrity; the on-chain receipt proves execution was paid for and settled.
+
+        Falls back to trusting TEE attestation when no real tx hash is available.
+        """
         self._ensure_init()
 
+        # Mock mode: no private key configured
         if self._client is None:
             return ProofVerification(
                 valid=True,
@@ -442,7 +451,17 @@ class OGExecutionClient:
                 output_hash_match=True,
             )
 
-        try:
+        # No real settlement hash available — trust TEE attestation
+        _is_fake = (
+            not settlement_tx
+            or settlement_tx == "external"
+            or len(settlement_tx) != 66  # not a real 0x-prefixed 32-byte hash
+        )
+        if _is_fake:
+            logger.info(
+                f"Run {run_id}: no on-chain settlement tx ({settlement_tx!r}); "
+                "trusting TEE attestation"
+            )
             return ProofVerification(
                 valid=True,
                 settlement_tx=settlement_tx,
@@ -450,8 +469,45 @@ class OGExecutionClient:
                 input_hash_match=True,
                 output_hash_match=True,
             )
+
+        try:
+            from web3 import Web3
+            from backend.config import settings
+
+            # x402 payments settle on Base Sepolia — same RPC as our contracts
+            w3 = Web3(Web3.HTTPProvider(settings.contract_rpc_url))
+            receipt = w3.eth.get_transaction_receipt(settlement_tx)
+
+            if receipt is None:
+                logger.warning(
+                    f"Run {run_id}: settlement tx {settlement_tx} not found on chain"
+                )
+                return ProofVerification(
+                    valid=False,
+                    settlement_tx=settlement_tx,
+                    model_cid=None,
+                    input_hash_match=False,
+                    output_hash_match=False,
+                )
+
+            # status=1 means the transaction succeeded
+            tx_valid = receipt.get("status", 0) == 1
+            logger.info(
+                f"Run {run_id}: settlement tx {settlement_tx} verified — "
+                f"block={receipt.get('blockNumber')}, status={receipt.get('status')}"
+            )
+
+            # Hash integrity is guaranteed by the TEE; on-chain receipt confirms settlement
+            return ProofVerification(
+                valid=tx_valid,
+                settlement_tx=settlement_tx,
+                model_cid=None,
+                input_hash_match=tx_valid,
+                output_hash_match=tx_valid,
+            )
+
         except Exception as e:
-            logger.error(f"Proof verification failed: {e}")
+            logger.error(f"Proof verification failed for run {run_id}: {e}")
             return ProofVerification(
                 valid=False,
                 settlement_tx=settlement_tx,

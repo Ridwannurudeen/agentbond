@@ -76,13 +76,20 @@ class TestFullLifecycle:
 
     @pytest.mark.asyncio
     async def test_full_lifecycle(self, client):
+        wallet = "0xlifecycle000000000000000000000000000001"
+
         # 1. Register agent
         r = await client.post("/api/agents", json={
-            "wallet_address": "0xlifecycle000000000000000000000000000001",
+            "wallet_address": wallet,
             "metadata_uri": "ipfs://QmLifecycle",
         })
         assert r.status_code == 200
         agent_id = r.json()["id"]
+
+        # Get API key for operator
+        r = await client.post(f"/api/operators/{wallet}/api-key")
+        assert r.status_code == 200
+        auth_headers = {"X-API-Key": r.json()["api_key"]}
 
         # 2. Register policy
         r = await client.post("/api/policies", json={
@@ -91,14 +98,14 @@ class TestFullLifecycle:
                 "allowed_tools": ["get_price"],
                 "max_value_per_action": 100,
             },
-        })
+        }, headers=auth_headers)
         assert r.status_code == 200
         policy_id = r.json()["id"]
 
         # 3. Stake
         r = await client.post(f"/api/agents/{agent_id}/stake", json={
             "amount_wei": "100000000000000000",
-        })
+        }, headers=auth_headers)
         assert r.status_code == 200
 
         # 4. Execute run

@@ -1,5 +1,6 @@
 """Tests for webhook notification service."""
 
+import json
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
@@ -102,14 +103,14 @@ class TestNotifyOperator:
             # Verify the URL and payload
             call_args = mock_client.post.call_args
             assert call_args.args[0] == "https://example.com/webhook"
-            payload = call_args.kwargs["json"]
+            payload = json.loads(call_args.kwargs["content"])
             assert payload["event"] == "test.event"
             assert payload["agent_id"] == agent_id
             assert payload["data"] == {"key": "value"}
 
-            # Verify signature header is set
+            # Verify signature header is set (HMAC-SHA256 format)
             headers = call_args.kwargs["headers"]
-            assert headers["X-AgentBond-Signature"] == "test-key-123"
+            assert headers["X-AgentBond-Signature"].startswith("sha256=")
 
     @pytest.mark.asyncio
     async def test_failed_delivery(self, db_session):
@@ -170,11 +171,10 @@ class TestWebhookHelpers:
     async def test_notify_claim_submitted(self, db_session):
         session, op_id, agent_id = db_session
 
-        with patch("backend.services.webhooks.notify_operator", new_callable=AsyncMock) as mock:
-            mock.return_value = True
+        with patch("backend.services.webhooks.fire_and_forget") as mock:
             await notify_claim_submitted(session, agent_id, 1, "TOOL_WHITELIST_VIOLATION", "run-123")
             mock.assert_called_once_with(
-                session, agent_id, "claim.submitted",
+                agent_id, "claim.submitted",
                 {"claim_id": 1, "reason_code": "TOOL_WHITELIST_VIOLATION", "run_id": "run-123"},
             )
 
@@ -182,11 +182,10 @@ class TestWebhookHelpers:
     async def test_notify_claim_resolved(self, db_session):
         session, op_id, agent_id = db_session
 
-        with patch("backend.services.webhooks.notify_operator", new_callable=AsyncMock) as mock:
-            mock.return_value = True
+        with patch("backend.services.webhooks.fire_and_forget") as mock:
             await notify_claim_resolved(session, agent_id, 1, True, "Violation confirmed")
             mock.assert_called_once_with(
-                session, agent_id, "claim.resolved",
+                agent_id, "claim.resolved",
                 {"claim_id": 1, "approved": True, "reason": "Violation confirmed"},
             )
 
@@ -194,10 +193,9 @@ class TestWebhookHelpers:
     async def test_notify_score_changed(self, db_session):
         session, op_id, agent_id = db_session
 
-        with patch("backend.services.webhooks.notify_operator", new_callable=AsyncMock) as mock:
-            mock.return_value = True
+        with patch("backend.services.webhooks.fire_and_forget") as mock:
             await notify_score_changed(session, agent_id, 100, 85)
             mock.assert_called_once_with(
-                session, agent_id, "score.changed",
+                agent_id, "score.changed",
                 {"old_score": 100, "new_score": 85},
             )

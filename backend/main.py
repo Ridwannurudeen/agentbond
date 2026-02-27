@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.db import init_db, get_db
-from backend.routers import agents, runs, claims, policies, scores
+from backend.routers import agents, runs, claims, policies, scores, operators
 from backend.middleware import RateLimitMiddleware
 from backend.auth import generate_api_key
 from backend.models.schema import Operator
@@ -47,6 +47,7 @@ app.include_router(runs.router)
 app.include_router(claims.router)
 app.include_router(policies.router)
 app.include_router(scores.router)
+app.include_router(operators.router)
 
 
 @app.get("/api/health")

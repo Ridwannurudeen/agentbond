@@ -1,10 +1,18 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { registerAgent, registerPolicy, stakeCollateral, executeRun } from "../api";
+import { useWallet } from "../context/WalletContext";
 
 export default function Operator() {
+  const { address } = useWallet();
+
   // Register Agent
   const [wallet, setWallet] = useState("");
   const [metadataUri, setMetadataUri] = useState("");
+
+  // Sync wallet address from MetaMask whenever it changes
+  useEffect(() => {
+    if (address) setWallet(address);
+  }, [address]);
   const [agentResult, setAgentResult] = useState<any>(null);
 
   // Register Policy
@@ -102,7 +110,14 @@ export default function Operator() {
         <h3>Register Agent</h3>
         <form onSubmit={handleRegister}>
           <div className="form-group">
-            <label>Wallet Address</label>
+            <label>
+              Wallet Address{" "}
+              {address && (
+                <span style={{ fontSize: 12, color: "#6c63ff", fontWeight: 400 }}>
+                  (auto-filled from MetaMask)
+                </span>
+              )}
+            </label>
             <input value={wallet} onChange={(e) => setWallet(e.target.value)} placeholder="0x..." required />
           </div>
           <div className="form-group">

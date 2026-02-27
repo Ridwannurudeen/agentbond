@@ -19,6 +19,7 @@ import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.models.schema import Agent, Operator, WebhookDelivery
+from backend.metrics import WEBHOOK_DELIVERIES_TOTAL, WEBHOOK_DURATION
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +74,10 @@ async def _deliver_once(
         error_message = str(exc)
 
     duration_ms = int((time.monotonic() - start) * 1000)
+
+    # Record Prometheus metrics
+    WEBHOOK_DELIVERIES_TOTAL.labels(event_type=event_type, success=str(success).lower()).inc()
+    WEBHOOK_DURATION.labels(event_type=event_type).observe(duration_ms / 1000)
 
     # Write audit record
     delivery = WebhookDelivery(

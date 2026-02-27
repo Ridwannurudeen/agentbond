@@ -21,6 +21,7 @@ from backend.services.claim_verifier import verify_claim
 from backend.services.reputation import snapshot_score
 from backend.services.webhooks import notify_claim_submitted, notify_claim_resolved
 from backend.validation import validate_reason_code
+from backend.metrics import CLAIMS_TOTAL
 
 router = APIRouter(prefix="/api/claims", tags=["claims"])
 logger = logging.getLogger(__name__)
@@ -72,6 +73,8 @@ async def submit_claim(req: SubmitClaimRequest, db: AsyncSession = Depends(get_d
     await db.commit()
     await db.refresh(claim)
 
+    CLAIMS_TOTAL.labels(status="submitted").inc()
+
     # Notify operator of claim submission
     await notify_claim_submitted(
         db, req.agent_id, claim.id, req.reason_code, req.run_id
@@ -85,9 +88,13 @@ async def submit_claim(req: SubmitClaimRequest, db: AsyncSession = Depends(get_d
         claim.payout_amount = 10000000000000000  # 0.01 ETH in wei
         claim.resolved_at = datetime.utcnow()
         await db.commit()
+        CLAIMS_TOTAL.labels(status="approved").inc()
 
         # Update reputation
         await snapshot_score(db, req.agent_id)
+
+    if not verification.approved:
+        CLAIMS_TOTAL.labels(status="rejected").inc()
 
     # Notify operator of resolution
     await notify_claim_resolved(

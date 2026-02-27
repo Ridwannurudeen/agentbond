@@ -1,17 +1,21 @@
 """Policy CRUD endpoints."""
 
+import asyncio
 import hashlib
 import json
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.contracts.interface import contracts
 from backend.db import get_db
 from backend.models.schema import Policy, Agent, PolicyStatus
 
 router = APIRouter(prefix="/api/policies", tags=["policies"])
+logger = logging.getLogger(__name__)
 
 
 class RegisterPolicyRequest(BaseModel):
@@ -43,12 +47,33 @@ async def register_policy(req: RegisterPolicyRequest, db: AsyncSession = Depends
     await db.commit()
     await db.refresh(policy)
 
+    # Wire up on-chain: register policy
+    chain_policy_id = None
+    chain_tx = None
+    if contracts.is_configured() and agent.chain_agent_id is not None:
+        try:
+            policy_hash_bytes = bytes.fromhex(policy_hash)
+            rules_uri = f"data:application/json,{rules_str}"
+            chain_policy_id, chain_tx = await asyncio.to_thread(
+                contracts.register_policy,
+                agent.chain_agent_id,
+                policy_hash_bytes,
+                rules_uri,
+            )
+            policy.chain_policy_id = chain_policy_id
+            await db.commit()
+            logger.info(f"Policy {policy.id} registered on-chain: chainId={chain_policy_id} tx={chain_tx}")
+        except Exception as e:
+            logger.warning(f"On-chain register_policy failed (non-fatal): {e}")
+
     return {
         "id": policy.id,
         "agent_id": policy.agent_id,
         "policy_hash": policy.policy_hash,
         "rules": policy.rules_json,
         "status": policy.status.value,
+        "chain_policy_id": chain_policy_id,
+        "chain_tx": chain_tx,
     }
 
 
@@ -65,6 +90,7 @@ async def get_policy(policy_id: int, db: AsyncSession = Depends(get_db)):
         "policy_hash": policy.policy_hash,
         "rules": policy.rules_json,
         "status": policy.status.value,
+        "chain_policy_id": policy.chain_policy_id,
         "created_at": policy.created_at.isoformat() if policy.created_at else None,
     }
 
@@ -95,7 +121,26 @@ async def activate_policy(
     policy.status = PolicyStatus.active
     await db.commit()
 
-    return {"policy_id": policy_id, "agent_id": req.agent_id, "status": "activated"}
+    # Wire up on-chain: activate policy
+    chain_tx = None
+    agent = await db.get(Agent, req.agent_id)
+    if (
+        contracts.is_configured()
+        and agent
+        and agent.chain_agent_id is not None
+        and policy.chain_policy_id is not None
+    ):
+        try:
+            chain_tx = await asyncio.to_thread(
+                contracts.activate_policy,
+                agent.chain_agent_id,
+                policy.chain_policy_id,
+            )
+            logger.info(f"Policy {policy_id} activated on-chain: tx={chain_tx}")
+        except Exception as e:
+            logger.warning(f"On-chain activate_policy failed (non-fatal): {e}")
+
+    return {"policy_id": policy_id, "agent_id": req.agent_id, "status": "activated", "chain_tx": chain_tx}
 
 
 @router.get("")
@@ -117,6 +162,7 @@ async def list_policies(
             "agent_id": p.agent_id,
             "policy_hash": p.policy_hash,
             "status": p.status.value,
+            "chain_policy_id": p.chain_policy_id,
             "created_at": p.created_at.isoformat() if p.created_at else None,
         }
         for p in policies

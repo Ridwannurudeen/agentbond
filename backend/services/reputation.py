@@ -7,6 +7,7 @@ Score formula (0-100):
   recency_bonus = up to 10 points for recent clean runs
 """
 
+import asyncio
 import logging
 from datetime import datetime, timedelta
 
@@ -93,7 +94,7 @@ async def compute_score(db: AsyncSession, agent_id: int) -> dict:
 
 
 async def snapshot_score(db: AsyncSession, agent_id: int) -> dict:
-    """Compute and persist a reputation snapshot."""
+    """Compute and persist a reputation snapshot, then sync to chain."""
     import hashlib, json
 
     score_data = await compute_score(db, agent_id)
@@ -110,11 +111,28 @@ async def snapshot_score(db: AsyncSession, agent_id: int) -> dict:
     )
     db.add(snapshot)
 
-    # Update agent's trust score
+    # Update agent's trust score in DB
     agent = await db.get(Agent, agent_id)
     if agent:
         agent.trust_score = score_data["score"]
 
     await db.commit()
+
+    # Sync trust score to chain
+    from backend.contracts.interface import contracts
+    if agent and agent.chain_agent_id is not None and contracts.is_configured():
+        try:
+            await asyncio.to_thread(
+                contracts.update_score,
+                agent.chain_agent_id,
+                score_data["score"],
+                score_data["total_runs"],
+                score_data["violations"],
+            )
+            logger.info(
+                f"Agent {agent_id} score synced on-chain: score={score_data['score']}"
+            )
+        except Exception as e:
+            logger.warning(f"On-chain score sync failed (non-fatal): {e}")
 
     return score_data

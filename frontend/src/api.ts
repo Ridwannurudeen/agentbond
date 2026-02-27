@@ -4,9 +4,14 @@ const api = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || "/api",
 });
 
-export async function fetchStats() {
-  const { data } = await api.get("/scores");
+export async function fetchDashboardStats() {
+  const { data } = await api.get("/dashboard/stats");
   return data;
+}
+
+// legacy alias
+export async function fetchStats() {
+  return fetchDashboardStats();
 }
 
 export async function fetchAgents() {
@@ -77,6 +82,11 @@ export async function fetchScore(agentId: number) {
   return data;
 }
 
+export async function fetchAllScores() {
+  const { data } = await api.get("/scores");
+  return data;
+}
+
 export async function fetchPolicies(agentId?: number) {
   const params = agentId ? { agent_id: agentId } : {};
   const { data } = await api.get("/policies", { params });
@@ -91,8 +101,20 @@ export async function registerPolicy(agentId: number, rules: object) {
   return data;
 }
 
+export async function activatePolicy(policyId: number) {
+  const { data } = await api.post(`/policies/${policyId}/activate`);
+  return data;
+}
+
 export async function stakeCollateral(agentId: number, amountWei: string) {
   const { data } = await api.post(`/agents/${agentId}/stake`, {
+    amount_wei: amountWei,
+  });
+  return data;
+}
+
+export async function unstakeCollateral(agentId: number, amountWei: string) {
+  const { data } = await api.post(`/agents/${agentId}/unstake`, {
     amount_wei: amountWei,
   });
   return data;

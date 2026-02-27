@@ -4,6 +4,7 @@ import { useWallet } from "../context/WalletContext";
 
 const navItems = [
   { path: "/", label: "Dashboard" },
+  { path: "/runs", label: "Runs" },
   { path: "/claims", label: "Claims" },
   { path: "/operator", label: "Operator" },
 ];
@@ -16,6 +17,9 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const location = useLocation();
   const { address, chainId, isConnecting, connect, disconnect } = useWallet();
 
+  const isActive = (path: string) =>
+    path === "/" ? location.pathname === "/" : location.pathname.startsWith(path);
+
   return (
     <div>
       <nav
@@ -27,9 +31,12 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           alignItems: "center",
           height: 56,
           gap: 32,
+          position: "sticky",
+          top: 0,
+          zIndex: 100,
         }}
       >
-        <Link to="/" style={{ fontWeight: 700, fontSize: 18, color: "#6c63ff" }}>
+        <Link to="/" style={{ fontWeight: 700, fontSize: 18, color: "#6c63ff", flexShrink: 0 }}>
           AgentBond
         </Link>
         {navItems.map((item) => (
@@ -37,8 +44,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             key={item.path}
             to={item.path}
             style={{
-              color: location.pathname === item.path ? "#6c63ff" : "#888",
-              fontWeight: location.pathname === item.path ? 600 : 400,
+              color: isActive(item.path) ? "#6c63ff" : "#888",
+              fontWeight: isActive(item.path) ? 600 : 400,
               fontSize: 14,
             }}
           >
@@ -50,7 +57,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           {address ? (
             <>
               {chainId && (
-                <span style={{ fontSize: 12, color: "#666", fontFamily: "monospace" }}>
+                <span style={{ fontSize: 12, color: "#555", fontFamily: "monospace" }}>
                   chain:{chainId}
                 </span>
               )}

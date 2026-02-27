@@ -96,6 +96,7 @@ async def compute_score(db: AsyncSession, agent_id: int) -> dict:
 async def snapshot_score(db: AsyncSession, agent_id: int) -> dict:
     """Compute and persist a reputation snapshot, then sync to chain."""
     import hashlib, json
+    from backend.services.webhooks import notify_score_changed
 
     score_data = await compute_score(db, agent_id)
 
@@ -111,12 +112,16 @@ async def snapshot_score(db: AsyncSession, agent_id: int) -> dict:
     )
     db.add(snapshot)
 
-    # Update agent's trust score in DB
+    # Capture old score before update, then apply new score
     agent = await db.get(Agent, agent_id)
+    old_score = agent.trust_score if agent else 100
     if agent:
         agent.trust_score = score_data["score"]
 
     await db.commit()
+
+    # Notify operator if score changed
+    await notify_score_changed(db, agent_id, old_score, score_data["score"])
 
     # Sync trust score to chain
     from backend.contracts.interface import contracts

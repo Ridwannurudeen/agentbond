@@ -1,14 +1,18 @@
 """Claim submission and resolution endpoints."""
 
+import asyncio
 import hashlib
 import json
+import logging
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from web3 import Web3
 
+from backend.contracts.interface import contracts
 from backend.db import get_db
 from backend.models.schema import Claim, Run, Agent, ClaimStatus
 from backend.services.claim_verifier import verify_claim
@@ -17,6 +21,7 @@ from backend.services.webhooks import notify_claim_submitted, notify_claim_resol
 from backend.validation import validate_reason_code
 
 router = APIRouter(prefix="/api/claims", tags=["claims"])
+logger = logging.getLogger(__name__)
 
 
 class SubmitClaimRequest(BaseModel):
@@ -87,12 +92,54 @@ async def submit_claim(req: SubmitClaimRequest, db: AsyncSession = Depends(get_d
         db, req.agent_id, claim.id, verification.approved, verification.reason
     )
 
+    # Wire up on-chain: submit + verify + payout
+    chain_claim_id = None
+    chain_submit_tx = None
+    chain_payout_tx = None
+
+    agent = await db.get(Agent, req.agent_id)
+    if contracts.is_configured() and agent and agent.chain_agent_id is not None:
+        try:
+            run_id_bytes = Web3.keccak(text=run.run_id)
+            evidence_hash_bytes = bytes.fromhex(evidence_hash)
+
+            chain_claim_id, chain_submit_tx = await asyncio.to_thread(
+                contracts.submit_claim,
+                run_id_bytes,
+                agent.chain_agent_id,
+                req.reason_code,
+                evidence_hash_bytes,
+            )
+            claim.chain_claim_id = chain_claim_id
+            await db.commit()
+            logger.info(f"Claim {claim.id} submitted on-chain: chainClaimId={chain_claim_id} tx={chain_submit_tx}")
+
+            # Verify on-chain
+            await asyncio.to_thread(
+                contracts.verify_claim, chain_claim_id, verification.approved
+            )
+
+            # Execute payout if approved
+            if verification.approved:
+                chain_payout_tx = await asyncio.to_thread(
+                    contracts.execute_payout, chain_claim_id
+                )
+                claim.status = ClaimStatus.paid
+                await db.commit()
+                logger.info(f"Claim {claim.id} paid on-chain: tx={chain_payout_tx}")
+
+        except Exception as e:
+            logger.warning(f"On-chain claim processing failed (non-fatal): {e}")
+
     return {
         "claim_id": claim.id,
         "status": claim.status.value,
         "approved": verification.approved,
         "reason": verification.reason,
         "evidence_hash": verification.evidence_hash,
+        "chain_claim_id": chain_claim_id,
+        "chain_submit_tx": chain_submit_tx,
+        "chain_payout_tx": chain_payout_tx,
     }
 
 
@@ -112,6 +159,7 @@ async def get_claim(claim_id: int, db: AsyncSession = Depends(get_db)):
         "evidence_hash": claim.evidence_hash,
         "status": claim.status.value,
         "payout_amount": str(claim.payout_amount) if claim.payout_amount else None,
+        "chain_claim_id": claim.chain_claim_id,
         "resolved_at": claim.resolved_at.isoformat() if claim.resolved_at else None,
         "created_at": claim.created_at.isoformat() if claim.created_at else None,
     }
@@ -140,6 +188,7 @@ async def list_claims(
             "agent_id": c.agent_id,
             "reason_code": c.reason_code,
             "status": c.status.value,
+            "chain_claim_id": c.chain_claim_id,
             "created_at": c.created_at.isoformat() if c.created_at else None,
         }
         for c in claims

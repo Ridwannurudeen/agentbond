@@ -38,6 +38,7 @@ WARRANTY_POOL_ABI = json.loads("""[
     {"inputs":[{"name":"requestId","type":"uint256"}],"name":"finalizeUnstake","outputs":[],"stateMutability":"nonpayable","type":"function"},
     {"inputs":[{"name":"agentId","type":"uint256"}],"name":"getCollateralHealth","outputs":[{"name":"staked","type":"uint256"},{"name":"reserved","type":"uint256"},{"name":"free","type":"uint256"},{"name":"ratioBps","type":"uint256"}],"stateMutability":"view","type":"function"},
     {"anonymous":false,"inputs":[{"indexed":true,"name":"agentId","type":"uint256"},{"name":"amount","type":"uint256"}],"name":"Staked","type":"event"},
+    {"anonymous":false,"inputs":[{"indexed":true,"name":"agentId","type":"uint256"},{"name":"amount","type":"uint256"},{"indexed":true,"name":"requestId","type":"uint256"}],"name":"UnstakeRequested","type":"event"},
     {"anonymous":false,"inputs":[{"indexed":true,"name":"agentId","type":"uint256"},{"name":"amount","type":"uint256"},{"indexed":true,"name":"claimId","type":"uint256"}],"name":"SlashExecuted","type":"event"},
     {"anonymous":false,"inputs":[{"indexed":true,"name":"recipient","type":"address"},{"name":"amount","type":"uint256"},{"indexed":true,"name":"claimId","type":"uint256"}],"name":"PayoutSent","type":"event"}
 ]""")
@@ -79,6 +80,16 @@ class ContractInterface:
         self.claim_manager = self._get_contract(
             settings.claim_manager_address, CLAIM_MANAGER_ABI
         ) if settings.claim_manager_address else None
+
+    def is_configured(self) -> bool:
+        """Returns True if the private key and all contract addresses are set."""
+        return (
+            self._account is not None
+            and self.agent_registry is not None
+            and self.policy_registry is not None
+            and self.warranty_pool is not None
+            and self.claim_manager is not None
+        )
 
     def _get_contract(self, address: str, abi: list):
         if not address:
@@ -168,7 +179,9 @@ class ContractInterface:
     def request_unstake(self, agent_id: int, amount_wei: int) -> tuple[int, str]:
         func = self.warranty_pool.functions.requestUnstake(agent_id, amount_wei)
         receipt = self._send_tx(func)
-        return 0, receipt.transactionHash.hex()  # TODO: parse requestId from logs
+        logs = self.warranty_pool.events.UnstakeRequested().process_receipt(receipt)
+        request_id = logs[0]["args"]["requestId"] if logs else 0
+        return request_id, receipt.transactionHash.hex()
 
     def get_collateral_health(self, agent_id: int) -> dict:
         result = self.warranty_pool.functions.getCollateralHealth(agent_id).call()

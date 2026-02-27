@@ -10,9 +10,10 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.auth import require_operator_key
 from backend.contracts.interface import contracts
 from backend.db import get_db
-from backend.models.schema import Policy, Agent, PolicyStatus
+from backend.models.schema import Policy, Agent, Operator, PolicyStatus
 
 router = APIRouter(prefix="/api/policies", tags=["policies"])
 logger = logging.getLogger(__name__)
@@ -28,11 +29,17 @@ class ActivatePolicyRequest(BaseModel):
 
 
 @router.post("")
-async def register_policy(req: RegisterPolicyRequest, db: AsyncSession = Depends(get_db)):
+async def register_policy(
+    req: RegisterPolicyRequest,
+    db: AsyncSession = Depends(get_db),
+    operator: Operator = Depends(require_operator_key),
+):
     """Register a new policy for an agent."""
     agent = await db.get(Agent, req.agent_id)
     if not agent:
         raise HTTPException(404, "Agent not found")
+    if agent.operator_id != operator.id:
+        raise HTTPException(403, "Agent does not belong to your operator account")
 
     rules_str = json.dumps(req.rules, sort_keys=True)
     policy_hash = hashlib.sha256(rules_str.encode()).hexdigest()
@@ -97,7 +104,10 @@ async def get_policy(policy_id: int, db: AsyncSession = Depends(get_db)):
 
 @router.post("/{policy_id}/activate")
 async def activate_policy(
-    policy_id: int, req: ActivatePolicyRequest, db: AsyncSession = Depends(get_db)
+    policy_id: int,
+    req: ActivatePolicyRequest,
+    db: AsyncSession = Depends(get_db),
+    operator: Operator = Depends(require_operator_key),
 ):
     """Activate a policy for an agent (deprecates previous active policy)."""
     policy = await db.get(Policy, policy_id)
@@ -106,6 +116,10 @@ async def activate_policy(
 
     if policy.agent_id != req.agent_id:
         raise HTTPException(400, "Policy does not belong to this agent")
+
+    agent = await db.get(Agent, req.agent_id)
+    if not agent or agent.operator_id != operator.id:
+        raise HTTPException(403, "Agent does not belong to your operator account")
 
     # Deprecate other active policies for this agent
     result = await db.execute(
@@ -123,7 +137,6 @@ async def activate_policy(
 
     # Wire up on-chain: activate policy
     chain_tx = None
-    agent = await db.get(Agent, req.agent_id)
     if (
         contracts.is_configured()
         and agent

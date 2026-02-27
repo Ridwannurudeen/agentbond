@@ -33,3 +33,20 @@ async def verify_operator_key(
     if not operator:
         raise HTTPException(401, "Invalid API key")
     return operator
+
+
+async def require_operator_key(
+    x_api_key: str = Header(default=None, alias="X-API-Key"),
+    db: AsyncSession = Depends(get_db),
+) -> Operator:
+    """Require a valid API key. Raises 401 if missing or invalid."""
+    if not x_api_key:
+        raise HTTPException(401, "API key required. Include X-API-Key header.")
+
+    result = await db.execute(
+        select(Operator).where(Operator.api_key == x_api_key)
+    )
+    operator = result.scalar_one_or_none()
+    if not operator:
+        raise HTTPException(401, "Invalid API key")
+    return operator

@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from web3 import Web3
 
+from backend.auth import require_operator_key
 from backend.contracts.interface import contracts
 from backend.db import get_db
 from backend.models.schema import Agent, Operator, AgentVersion, AgentStatus, StakeEvent, Policy
@@ -132,12 +133,17 @@ async def list_agents(db: AsyncSession = Depends(get_db)):
 
 @router.post("/{agent_id}/versions")
 async def publish_version(
-    agent_id: int, req: PublishVersionRequest, db: AsyncSession = Depends(get_db)
+    agent_id: int,
+    req: PublishVersionRequest,
+    db: AsyncSession = Depends(get_db),
+    operator: Operator = Depends(require_operator_key),
 ):
     """Publish a new agent version."""
     agent = await db.get(Agent, agent_id)
     if not agent:
         raise HTTPException(404, "Agent not found")
+    if agent.operator_id != operator.id:
+        raise HTTPException(403, "Agent does not belong to your operator account")
 
     version = AgentVersion(
         agent_id=agent_id,
@@ -184,12 +190,17 @@ async def publish_version(
 
 @router.post("/{agent_id}/status")
 async def set_agent_status(
-    agent_id: int, req: SetStatusRequest, db: AsyncSession = Depends(get_db)
+    agent_id: int,
+    req: SetStatusRequest,
+    db: AsyncSession = Depends(get_db),
+    operator: Operator = Depends(require_operator_key),
 ):
     """Update agent status."""
     agent = await db.get(Agent, agent_id)
     if not agent:
         raise HTTPException(404, "Agent not found")
+    if agent.operator_id != operator.id:
+        raise HTTPException(403, "Agent does not belong to your operator account")
 
     try:
         agent.status = AgentStatus(req.status)
@@ -206,16 +217,17 @@ class WebhookConfigRequest(BaseModel):
 
 @router.post("/{agent_id}/webhook")
 async def configure_webhook(
-    agent_id: int, req: WebhookConfigRequest, db: AsyncSession = Depends(get_db)
+    agent_id: int,
+    req: WebhookConfigRequest,
+    db: AsyncSession = Depends(get_db),
+    operator: Operator = Depends(require_operator_key),
 ):
     """Configure webhook URL for the operator of this agent."""
     agent = await db.get(Agent, agent_id)
     if not agent:
         raise HTTPException(404, "Agent not found")
-
-    operator = await db.get(Operator, agent.operator_id)
-    if not operator:
-        raise HTTPException(404, "Operator not found")
+    if agent.operator_id != operator.id:
+        raise HTTPException(403, "Agent does not belong to your operator account")
 
     operator.webhook_url = req.webhook_url
     await db.commit()
@@ -229,12 +241,17 @@ async def configure_webhook(
 
 @router.post("/{agent_id}/stake")
 async def stake_collateral(
-    agent_id: int, req: StakeRequest, db: AsyncSession = Depends(get_db)
+    agent_id: int,
+    req: StakeRequest,
+    db: AsyncSession = Depends(get_db),
+    operator: Operator = Depends(require_operator_key),
 ):
     """Stake collateral in WarrantyPool on-chain, then record the event."""
     agent = await db.get(Agent, agent_id)
     if not agent:
         raise HTTPException(404, "Agent not found")
+    if agent.operator_id != operator.id:
+        raise HTTPException(403, "Agent does not belong to your operator account")
 
     amount_wei = int(req.amount_wei)
     tx_hash = None
@@ -262,12 +279,17 @@ async def stake_collateral(
 
 @router.post("/{agent_id}/unstake")
 async def request_unstake(
-    agent_id: int, req: UnstakeRequest, db: AsyncSession = Depends(get_db)
+    agent_id: int,
+    req: UnstakeRequest,
+    db: AsyncSession = Depends(get_db),
+    operator: Operator = Depends(require_operator_key),
 ):
     """Request unstake from WarrantyPool on-chain, then record the event."""
     agent = await db.get(Agent, agent_id)
     if not agent:
         raise HTTPException(404, "Agent not found")
+    if agent.operator_id != operator.id:
+        raise HTTPException(403, "Agent does not belong to your operator account")
 
     amount_wei = int(req.amount_wei)
     tx_hash = None

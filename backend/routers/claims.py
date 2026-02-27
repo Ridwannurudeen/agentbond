@@ -14,6 +14,8 @@ from web3 import Web3
 
 from backend.contracts.interface import contracts
 from backend.db import get_db
+from sqlalchemy.orm import selectinload
+
 from backend.models.schema import Claim, Run, Agent, ClaimStatus
 from backend.services.claim_verifier import verify_claim
 from backend.services.reputation import snapshot_score
@@ -146,13 +148,16 @@ async def submit_claim(req: SubmitClaimRequest, db: AsyncSession = Depends(get_d
 @router.get("/{claim_id}")
 async def get_claim(claim_id: int, db: AsyncSession = Depends(get_db)):
     """Get claim status and details."""
-    claim = await db.get(Claim, claim_id)
+    result = await db.execute(
+        select(Claim).options(selectinload(Claim.run)).where(Claim.id == claim_id)
+    )
+    claim = result.scalar_one_or_none()
     if not claim:
         raise HTTPException(404, "Claim not found")
 
     return {
         "id": claim.id,
-        "run_id": claim.run_id,
+        "run_id": claim.run.run_id if claim.run else None,  # UUID string
         "agent_id": claim.agent_id,
         "claimant_address": claim.claimant_address,
         "reason_code": claim.reason_code,
@@ -173,7 +178,12 @@ async def list_claims(
     db: AsyncSession = Depends(get_db),
 ):
     """List claims with optional filters."""
-    query = select(Claim).order_by(Claim.id.desc()).limit(limit)
+    query = (
+        select(Claim)
+        .options(selectinload(Claim.run))
+        .order_by(Claim.id.desc())
+        .limit(limit)
+    )
     if agent_id:
         query = query.where(Claim.agent_id == agent_id)
     if status:
@@ -185,6 +195,7 @@ async def list_claims(
     return [
         {
             "id": c.id,
+            "run_id": c.run.run_id if c.run else None,  # UUID string for frontend links
             "agent_id": c.agent_id,
             "reason_code": c.reason_code,
             "status": c.status.value,

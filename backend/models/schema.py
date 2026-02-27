@@ -2,7 +2,7 @@ import enum
 from datetime import datetime
 
 from sqlalchemy import (
-    Column, Integer, String, DateTime, Text, Numeric, Enum, ForeignKey, JSON
+    Column, Integer, String, DateTime, Text, Numeric, Enum, ForeignKey, JSON, Boolean
 )
 from sqlalchemy.orm import relationship
 
@@ -145,4 +145,21 @@ class ReputationSnapshot(Base):
     total_runs = Column(Integer, nullable=False)
     violations = Column(Integer, nullable=False)
     snapshot_hash = Column(String(66), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class WebhookDelivery(Base):
+    __tablename__ = "webhook_deliveries"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    operator_id = Column(Integer, ForeignKey("operators.id"), nullable=False)
+    agent_id = Column(Integer, ForeignKey("agents.id"), nullable=True)
+    event_type = Column(String(64), nullable=False)
+    webhook_url = Column(Text, nullable=False)
+    payload_json = Column(JSON, nullable=False)
+    attempt = Column(Integer, default=1, nullable=False)
+    status_code = Column(Integer, nullable=True)
+    success = Column(Boolean, nullable=False, default=False)
+    error_message = Column(Text, nullable=True)
+    duration_ms = Column(Integer, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)

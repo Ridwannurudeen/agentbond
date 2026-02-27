@@ -3,6 +3,7 @@
 import hashlib
 import json
 import logging
+import time
 import uuid
 from datetime import datetime
 
@@ -13,6 +14,7 @@ from backend.models.schema import Agent, Run, Policy
 from backend.services.og_client import OGExecutionClient, RunResult, DEFAULT_MODEL
 from backend.services.policy_engine import evaluate_policy
 from backend.config import settings
+from backend.metrics import RUNS_TOTAL, RUN_DURATION
 
 logger = logging.getLogger(__name__)
 
@@ -49,13 +51,15 @@ async def execute_run(
     # Determine model from metadata or use default
     model_id = DEFAULT_MODEL
 
-    # Execute via OG SDK
+    # Execute via OG SDK (timed for Prometheus)
+    run_start = time.perf_counter()
     run_result: RunResult = await og_client.execute_agent_run(
         model_id=model_id,
         user_input=user_input,
         tools=policy_rules.get("allowed_tools"),
         simulate_tools=simulate_tools,
     )
+    RUN_DURATION.observe(time.perf_counter() - run_start)
 
     # Evaluate policy
     run_metadata = {
@@ -89,6 +93,8 @@ async def execute_run(
 
     await db.commit()
     await db.refresh(run)
+
+    RUNS_TOTAL.labels(verdict=run.policy_verdict).inc()
 
     return {
         "run_id": run.run_id,

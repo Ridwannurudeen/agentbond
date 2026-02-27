@@ -1,4 +1,4 @@
-"""Middleware for rate limiting and request validation."""
+"""Middleware for rate limiting, request validation, and Prometheus metrics."""
 
 import time
 import logging
@@ -7,7 +7,39 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
+from backend.metrics import HTTP_REQUESTS_TOTAL, HTTP_REQUEST_DURATION, RATE_LIMIT_HITS_TOTAL
+
 logger = logging.getLogger(__name__)
+
+
+def _route_path(request: Request) -> str:
+    """Return the route template (e.g. /api/agents/{agent_id}) instead of the
+    resolved path, to avoid high-cardinality metric labels."""
+    route = request.scope.get("route")
+    if route and hasattr(route, "path"):
+        return route.path
+    # Fallback: strip numeric segments so /api/agents/42 → /api/agents/{id}
+    import re
+    return re.sub(r"/\d+", "/{id}", request.url.path)
+
+
+class MetricsMiddleware(BaseHTTPMiddleware):
+    """Record Prometheus HTTP metrics for every request."""
+
+    async def dispatch(self, request: Request, call_next):
+        method = request.method
+        path = _route_path(request)
+        start = time.perf_counter()
+
+        response = await call_next(request)
+
+        duration = time.perf_counter() - start
+        status = str(response.status_code)
+
+        HTTP_REQUESTS_TOTAL.labels(method=method, path=path, status=status).inc()
+        HTTP_REQUEST_DURATION.labels(method=method, path=path).observe(duration)
+
+        return response
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
@@ -23,12 +55,12 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         now = time.time()
         window_start = now - 60
 
-        # Clean old entries and count recent requests
         self.requests[client_ip] = [
             t for t in self.requests[client_ip] if t > window_start
         ]
 
         if len(self.requests[client_ip]) >= self.rpm:
+            RATE_LIMIT_HITS_TOTAL.inc()
             return JSONResponse(
                 status_code=429,
                 content={"detail": "Rate limit exceeded. Try again later."},

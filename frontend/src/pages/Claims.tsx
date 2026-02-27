@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { fetchClaims, submitClaim } from "../api";
+import { useWallet } from "../context/WalletContext";
 
 const REASON_CODES = [
   "TOOL_WHITELIST_VIOLATION",
@@ -11,6 +12,7 @@ const REASON_CODES = [
 ];
 
 export default function Claims() {
+  const { address } = useWallet();
   const [claims, setClaims] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -20,6 +22,11 @@ export default function Claims() {
   const [claimantAddress, setClaimantAddress] = useState("");
   const [reasonCode, setReasonCode] = useState(REASON_CODES[0]);
   const [result, setResult] = useState<any>(null);
+
+  // Auto-fill claimant address from connected wallet
+  useEffect(() => {
+    if (address) setClaimantAddress(address);
+  }, [address]);
 
   useEffect(() => {
     fetchClaims()
@@ -60,7 +67,14 @@ export default function Claims() {
             <input value={agentId} onChange={(e) => setAgentId(e.target.value)} placeholder="1" required />
           </div>
           <div className="form-group">
-            <label>Claimant Address</label>
+            <label>
+              Claimant Address{" "}
+              {address && (
+                <span style={{ fontSize: 12, color: "#6c63ff", fontWeight: 400 }}>
+                  (auto-filled from MetaMask)
+                </span>
+              )}
+            </label>
             <input value={claimantAddress} onChange={(e) => setClaimantAddress(e.target.value)} placeholder="0x..." required />
           </div>
           <div className="form-group">

@@ -5,7 +5,7 @@ const api = axios.create({
 });
 
 export async function fetchStats() {
-  const { data } = await api.get("/dashboard/stats");
+  const { data } = await api.get("/scores");
   return data;
 }
 

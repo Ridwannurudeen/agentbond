@@ -58,7 +58,7 @@ class ContractInterface:
     """Unified interface for interacting with AgentBond contracts."""
 
     def __init__(self):
-        self.w3 = Web3(Web3.HTTPProvider(settings.og_rpc_url))
+        self.w3 = Web3(Web3.HTTPProvider(settings.contract_rpc_url))
         self.w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
 
         self._account = None
@@ -108,7 +108,7 @@ class ContractInterface:
             "nonce": self.w3.eth.get_transaction_count(self._account.address),
             "gas": 500_000,
             "gasPrice": self.w3.eth.gas_price,
-            "chainId": settings.chain_id,
+            "chainId": settings.contract_chain_id,
             "value": value,
         })
         signed = self._account.sign_transaction(tx)

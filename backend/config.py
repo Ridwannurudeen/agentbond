@@ -9,6 +9,10 @@ class Settings(BaseSettings):
     og_rpc_url: str = "https://ogevmdevnet.opengradient.ai"
     chain_id: int = 10740
 
+    # Contract network (may differ from OG inference network)
+    contract_rpc_url: str = "https://sepolia.base.org"
+    contract_chain_id: int = 84532
+
     # Deployed contract addresses (set after deployment)
     agent_registry_address: str = ""
     policy_registry_address: str = ""

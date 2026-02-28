@@ -2,14 +2,18 @@
 
 @layer base {
   body {
-    @apply bg-zinc-950 text-zinc-100 antialiased;
+    background-color: #09090b;
+    color: #f4f4f5;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
     font-feature-settings: "ss01", "ss02";
   }
   a {
-    @apply text-violet-400 no-underline;
+    color: #a78bfa;
+    text-decoration: none;
   }
   a:hover {
-    @apply underline;
+    text-decoration: underline;
   }
 }
 
@@ -18,7 +22,6 @@
     @apply bg-zinc-900/80 backdrop-blur-sm border border-zinc-800 rounded-xl;
   }
 
-  /* Badges — all styles inline (no @apply of custom classes) */
   .badge-pass {
     @apply inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-950 text-emerald-400 border border-emerald-900;
   }
@@ -32,7 +35,6 @@
     @apply inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-950 text-amber-400 border border-amber-900;
   }
 
-  /* Buttons */
   .btn-primary {
     @apply inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-colors cursor-pointer border-0 select-none bg-violet-600 hover:bg-violet-700 text-white;
   }
@@ -43,7 +45,6 @@
     @apply inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-colors cursor-pointer border-0 select-none bg-red-700 hover:bg-red-800 text-white;
   }
 
-  /* Form elements */
   .form-input {
     @apply bg-zinc-900 border border-zinc-700 text-zinc-100 px-3 py-2.5 rounded-lg text-sm w-full transition-colors placeholder:text-zinc-600;
     outline: none;
@@ -56,7 +57,6 @@
     @apply block text-xs font-medium text-zinc-500 uppercase tracking-wider mb-1.5;
   }
 
-  /* Tables */
   .data-table {
     @apply w-full;
   }
@@ -73,7 +73,6 @@
     @apply bg-zinc-900/30;
   }
 
-  /* Stats */
   .stat-value {
     @apply text-4xl font-bold text-zinc-100 tabular-nums;
   }

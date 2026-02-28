@@ -1,7 +1,106 @@
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { fetchDashboardStats, fetchAgents, fetchRuns } from "../api";
+import { Bot, Activity, FileWarning, TrendingUp, ArrowRight, ExternalLink } from "lucide-react";
+import { motion } from "framer-motion";
 
+// ── Identicon ────────────────────────────────────────────────────────────────
+function Identicon({ id, size = 28 }: { id: number; size?: number }) {
+  const hue = (id * 137.508) % 360;
+  const color = `hsl(${hue}, 55%, 58%)`;
+  const seed = id * 2654435761;
+  const cells = Array.from({ length: 15 }, (_, i) => !!(seed & (1 << (i % 30))));
+  const grid: boolean[][] = [];
+  for (let y = 0; y < 5; y++) {
+    grid.push([cells[y * 3], cells[y * 3 + 1], cells[y * 3 + 2], cells[y * 3 + 1], cells[y * 3]]);
+  }
+  const cs = size / 5;
+  return (
+    <svg width={size} height={size} style={{ borderRadius: 6, display: "block", flexShrink: 0 }}>
+      <rect width={size} height={size} fill="#18181b" />
+      {grid.map((row, y) =>
+        row.map((filled, x) =>
+          filled ? <rect key={`${x}-${y}`} x={x * cs} y={y * cs} width={cs} height={cs} fill={color} /> : null
+        )
+      )}
+    </svg>
+  );
+}
+
+// ── Radial gauge ─────────────────────────────────────────────────────────────
+function RadialGauge({ value }: { value: number }) {
+  const r = 28;
+  const circ = 2 * Math.PI * r;
+  const dash = (value / 100) * circ;
+  const color = value >= 80 ? "#10b981" : value >= 60 ? "#f59e0b" : "#ef4444";
+  return (
+    <svg width={72} height={72} className="-rotate-90">
+      <circle cx={36} cy={36} r={r} fill="none" stroke="#27272a" strokeWidth={6} />
+      <circle
+        cx={36} cy={36} r={r}
+        fill="none"
+        stroke={color}
+        strokeWidth={6}
+        strokeDasharray={`${dash} ${circ}`}
+        strokeLinecap="round"
+        style={{ transition: "stroke-dasharray 0.6s ease" }}
+      />
+    </svg>
+  );
+}
+
+// ── Sparkline ────────────────────────────────────────────────────────────────
+function Sparkline({ runs }: { runs: any[] }) {
+  if (runs.length < 2) return <div className="w-20 h-8" />;
+  const last = runs.slice(-20);
+  const w = 80, h = 32;
+  const dx = w / (last.length - 1);
+  const points = last.map((r: any, i: number) => `${i * dx},${r.policy_verdict === "pass" ? 4 : h - 4}`).join(" ");
+  return (
+    <svg width={w} height={h} className="opacity-70">
+      <polyline points={points} fill="none" stroke="#8b5cf6" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+// ── Score colour helper ──────────────────────────────────────────────────────
+const scoreColor = (s: number) =>
+  s >= 80 ? "text-emerald-400" : s >= 60 ? "text-amber-400" : "text-red-400";
+
+const scoreBorderColor = (s: number) =>
+  s >= 80 ? "#10b981" : s >= 60 ? "#f59e0b" : "#ef4444";
+
+// ── Stat card ────────────────────────────────────────────────────────────────
+function StatCard({
+  label,
+  value,
+  icon: Icon,
+  sub,
+}: {
+  label: string;
+  value: React.ReactNode;
+  icon: React.ElementType;
+  sub?: React.ReactNode;
+}) {
+  return (
+    <motion.div
+      className="glass-card p-5 flex flex-col gap-3"
+      whileHover={{ y: -2 }}
+      transition={{ duration: 0.15 }}
+    >
+      <div className="flex items-center justify-between">
+        <span className="stat-label">{label}</span>
+        <div className="w-7 h-7 rounded-lg bg-zinc-800/80 flex items-center justify-center">
+          <Icon size={14} className="text-zinc-500" />
+        </div>
+      </div>
+      <div className="stat-value">{value}</div>
+      {sub && <div className="text-xs text-zinc-600">{sub}</div>}
+    </motion.div>
+  );
+}
+
+// ── Main ─────────────────────────────────────────────────────────────────────
 export default function Dashboard() {
   const [stats, setStats] = useState<any>(null);
   const [agents, setAgents] = useState<any[]>([]);
@@ -11,21 +110,21 @@ export default function Dashboard() {
 
   useEffect(() => {
     Promise.all([fetchDashboardStats(), fetchAgents(), fetchRuns()])
-      .then(([s, a, r]) => {
-        setStats(s);
-        setAgents(a);
-        setRuns(r);
-      })
+      .then(([s, a, r]) => { setStats(s); setAgents(a); setRuns(r); })
       .catch((err) => setError(err.response?.data?.detail || err.message || "Failed to load"))
       .finally(() => setLoading(false));
   }, []);
 
   if (loading)
-    return <div style={{ textAlign: "center", paddingTop: 80, color: "#666" }}>Loading...</div>;
+    return (
+      <div className="flex items-center justify-center pt-20 text-zinc-600 text-sm">
+        Loading...
+      </div>
+    );
 
   if (error)
     return (
-      <div style={{ background: "#1a0a0a", border: "1px solid #3a1a1a", borderRadius: 12, padding: 32, color: "#f44336" }}>
+      <div className="glass-card p-8 border-red-900/50 bg-red-950/20 text-red-400 text-sm">
         {error}
       </div>
     );
@@ -35,66 +134,113 @@ export default function Dashboard() {
       ? Math.round(((stats.total_runs - (stats.total_violations ?? 0)) / stats.total_runs) * 100)
       : null;
 
-  const scoreColor = (s: number) => (s >= 80 ? "#4caf50" : s >= 60 ? "#ff9800" : "#f44336");
+  const containerVariants = {
+    hidden: {},
+    show: { transition: { staggerChildren: 0.05 } },
+  };
+  const itemVariants = {
+    hidden: { opacity: 0, y: 8 },
+    show: { opacity: 1, y: 0 },
+  };
 
   return (
     <div>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 24 }}>
-        <h1 style={{ marginBottom: 0 }}>Dashboard</h1>
-        <Link to="/operator">
-          <button>+ Register Agent</button>
+      {/* Header */}
+      <div className="flex items-center justify-between mb-8">
+        <div>
+          <h1 className="text-2xl font-bold text-zinc-100">Dashboard</h1>
+          <p className="text-sm text-zinc-600 mt-0.5">Verifiable agent execution overview</p>
+        </div>
+        <Link to="/operator" className="no-underline">
+          <button className="btn-primary">
+            + Register Agent
+          </button>
         </Link>
       </div>
 
-      <div className="grid" style={{ marginBottom: 32 }}>
-        <div className="stat-card">
-          <h3>Agents</h3>
-          <div className="value">{stats?.total_agents ?? 0}</div>
-        </div>
-        <div className="stat-card">
-          <h3>Total Runs</h3>
-          <div className="value">{stats?.total_runs ?? 0}</div>
-        </div>
-        <div className="stat-card">
-          <h3>Claims</h3>
-          <div className="value">{stats?.total_claims ?? 0}</div>
-        </div>
-        <div className="stat-card">
-          <h3>Pass Rate</h3>
-          <div
-            className="value"
-            style={{
-              color:
-                passRate === null
-                  ? "#666"
-                  : passRate >= 80
-                  ? "#4caf50"
-                  : passRate >= 60
-                  ? "#ff9800"
-                  : "#f44336",
-            }}
-          >
-            {passRate === null ? "—" : `${passRate}%`}
-          </div>
-        </div>
-      </div>
+      {/* Stat cards — bento grid */}
+      <motion.div
+        className="grid grid-cols-4 gap-4 mb-8"
+        variants={containerVariants}
+        initial="hidden"
+        animate="show"
+      >
+        <motion.div variants={itemVariants}>
+          <StatCard
+            label="Agents"
+            value={stats?.total_agents ?? 0}
+            icon={Bot}
+            sub={`${agents.filter((a) => a.status === "active").length} active`}
+          />
+        </motion.div>
+        <motion.div variants={itemVariants}>
+          <StatCard
+            label="Total Runs"
+            value={stats?.total_runs ?? 0}
+            icon={Activity}
+            sub={<Sparkline runs={runs} />}
+          />
+        </motion.div>
+        <motion.div variants={itemVariants}>
+          <StatCard
+            label="Claims"
+            value={stats?.total_claims ?? 0}
+            icon={FileWarning}
+            sub={`${stats?.total_violations ?? 0} violations`}
+          />
+        </motion.div>
 
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-        <h2 style={{ marginBottom: 0 }}>Agents</h2>
+        {/* Pass rate card with radial gauge */}
+        <motion.div variants={itemVariants}>
+          <motion.div className="glass-card p-5 flex flex-col gap-2" whileHover={{ y: -2 }} transition={{ duration: 0.15 }}>
+            <div className="flex items-center justify-between">
+              <span className="stat-label">Pass Rate</span>
+              <div className="w-7 h-7 rounded-lg bg-zinc-800/80 flex items-center justify-center">
+                <TrendingUp size={14} className="text-zinc-500" />
+              </div>
+            </div>
+            <div className="flex items-center gap-4">
+              <div>
+                <div
+                  className={`text-4xl font-bold tabular-nums ${
+                    passRate === null
+                      ? "text-zinc-600"
+                      : passRate >= 80
+                      ? "text-emerald-400"
+                      : passRate >= 60
+                      ? "text-amber-400"
+                      : "text-red-400"
+                  }`}
+                >
+                  {passRate === null ? "—" : `${passRate}%`}
+                </div>
+              </div>
+              {passRate !== null && <RadialGauge value={passRate} />}
+            </div>
+          </motion.div>
+        </motion.div>
+      </motion.div>
+
+      {/* Agents table */}
+      <div className="flex items-center justify-between mb-3">
+        <h2 className="text-base font-semibold text-zinc-100">Agents</h2>
       </div>
-      <div className="card">
+      <div className="glass-card mb-6 overflow-hidden">
         {agents.length === 0 ? (
-          <div style={{ textAlign: "center", padding: "48px 0", color: "#666" }}>
-            <p style={{ marginBottom: 16 }}>No agents registered yet.</p>
-            <Link to="/operator">
-              <button>Register Your First Agent</button>
+          <div className="flex flex-col items-center py-16 gap-4">
+            <div className="w-12 h-12 rounded-xl bg-zinc-800/80 flex items-center justify-center">
+              <Bot size={20} className="text-zinc-600" />
+            </div>
+            <p className="text-zinc-600 text-sm">No agents registered yet.</p>
+            <Link to="/operator" className="no-underline">
+              <button className="btn-ghost text-xs">Register Your First Agent</button>
             </Link>
           </div>
         ) : (
-          <table>
+          <table className="data-table">
             <thead>
               <tr>
-                <th>ID</th>
+                <th>Agent</th>
                 <th>Metadata URI</th>
                 <th>Status</th>
                 <th>Trust Score</th>
@@ -107,48 +253,55 @@ export default function Dashboard() {
               {agents.map((a: any) => (
                 <tr key={a.id}>
                   <td>
-                    <Link to={`/agents/${a.id}`}>#{a.id}</Link>
+                    <div className="flex items-center gap-2.5">
+                      <Identicon id={a.id} size={28} />
+                      <Link to={`/agents/${a.id}`} className="font-mono text-xs text-violet-400">
+                        #{a.id}
+                      </Link>
+                    </div>
                   </td>
-                  <td
-                    style={{
-                      maxWidth: 220,
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                      fontSize: 13,
-                      color: "#aaa",
-                    }}
-                  >
+                  <td className="max-w-[200px] truncate text-zinc-500 text-xs font-mono">
                     {a.metadata_uri}
                   </td>
                   <td>
-                    <span className={`badge badge-${a.status === "active" ? "active" : "fail"}`}>
-                      {a.status}
-                    </span>
+                    {a.status === "active" ? (
+                      <span className="badge-active flex items-center gap-1.5 w-fit">
+                        <span className="w-1.5 h-1.5 rounded-full bg-blue-400 pulse-dot" />
+                        {a.status}
+                      </span>
+                    ) : (
+                      <span className="badge-fail">{a.status}</span>
+                    )}
                   </td>
                   <td>
-                    <span
-                      className="score-ring"
-                      style={{
-                        width: 40,
-                        height: 40,
-                        fontSize: 14,
-                        borderColor: scoreColor(a.trust_score),
-                        color: scoreColor(a.trust_score),
-                      }}
-                    >
-                      {a.trust_score}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <svg width={32} height={32} className="-rotate-90">
+                        <circle cx={16} cy={16} r={11} fill="none" stroke="#27272a" strokeWidth={3} />
+                        <circle
+                          cx={16} cy={16} r={11}
+                          fill="none"
+                          stroke={scoreBorderColor(a.trust_score)}
+                          strokeWidth={3}
+                          strokeDasharray={`${(a.trust_score / 100) * 2 * Math.PI * 11} ${2 * Math.PI * 11}`}
+                          strokeLinecap="round"
+                        />
+                      </svg>
+                      <span className={`text-sm font-bold tabular-nums ${scoreColor(a.trust_score)}`}>
+                        {a.trust_score}
+                      </span>
+                    </div>
                   </td>
-                  <td>{a.total_runs}</td>
+                  <td className="tabular-nums text-zinc-400">{a.total_runs}</td>
                   <td>
-                    <span style={{ color: a.violations > 0 ? "#f44336" : "#4caf50" }}>
+                    <span className={a.violations > 0 ? "text-red-400 tabular-nums font-medium" : "text-emerald-400 tabular-nums"}>
                       {a.violations}
                     </span>
                   </td>
                   <td>
-                    <Link to={`/agents/${a.id}`}>
-                      <button style={{ padding: "4px 12px", fontSize: 12 }}>View</button>
+                    <Link to={`/agents/${a.id}`} className="no-underline">
+                      <button className="btn-ghost py-1 px-2 text-xs gap-1">
+                        View <ExternalLink size={11} />
+                      </button>
                     </Link>
                   </td>
                 </tr>
@@ -158,19 +311,20 @@ export default function Dashboard() {
         )}
       </div>
 
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-        <h2 style={{ marginBottom: 0 }}>Recent Runs</h2>
-        <Link to="/runs" style={{ fontSize: 13, color: "#6c63ff" }}>
-          View all →
+      {/* Recent Runs */}
+      <div className="flex items-center justify-between mb-3">
+        <h2 className="text-base font-semibold text-zinc-100">Recent Runs</h2>
+        <Link to="/runs" className="text-xs text-zinc-500 hover:text-violet-400 flex items-center gap-1 no-underline transition-colors">
+          View all → <ArrowRight size={12} />
         </Link>
       </div>
-      <div className="card">
+      <div className="glass-card overflow-hidden">
         {runs.length === 0 ? (
-          <div style={{ textAlign: "center", padding: "32px 0", color: "#555" }}>
+          <div className="py-12 text-center text-zinc-600 text-sm">
             No runs yet. Select an agent and execute a run.
           </div>
         ) : (
-          <table>
+          <table className="data-table">
             <thead>
               <tr>
                 <th>Run ID</th>
@@ -184,20 +338,24 @@ export default function Dashboard() {
               {runs.slice(0, 10).map((r: any) => (
                 <tr key={r.run_id}>
                   <td>
-                    <Link to={`/runs/${r.run_id}`}>{r.run_id.substring(0, 12)}...</Link>
+                    <Link to={`/runs/${r.run_id}`} className="font-mono text-xs text-violet-400">
+                      {r.run_id.substring(0, 12)}...
+                    </Link>
                   </td>
                   <td>
-                    <Link to={`/agents/${r.agent_id}`}>#{r.agent_id}</Link>
+                    <Link to={`/agents/${r.agent_id}`} className="text-xs text-zinc-400">
+                      #{r.agent_id}
+                    </Link>
                   </td>
                   <td>
-                    <span className={`badge badge-${r.policy_verdict === "pass" ? "pass" : "fail"}`}>
+                    <span className={`badge-${r.policy_verdict === "pass" ? "pass" : "fail"}`}>
                       {r.policy_verdict}
                     </span>
                   </td>
-                  <td style={{ fontFamily: "monospace", fontSize: 12, color: "#aaa" }}>
+                  <td className="font-mono text-xs text-zinc-600">
                     {r.settlement_tx ? `${r.settlement_tx.substring(0, 14)}...` : "—"}
                   </td>
-                  <td style={{ fontSize: 13, color: "#aaa" }}>
+                  <td className="text-xs text-zinc-600">
                     {r.created_at ? new Date(r.created_at).toLocaleString() : "—"}
                   </td>
                 </tr>

@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { fetchRuns } from "../api";
+import { Filter } from "lucide-react";
+import { motion } from "framer-motion";
 
 type VerdictFilter = "all" | "pass" | "fail";
 
@@ -28,98 +30,93 @@ export default function Runs() {
     }
   };
 
-  useEffect(() => {
-    load();
-  }, []);
+  useEffect(() => { load(); }, []);
 
-  const handleFilter = (e: React.FormEvent) => {
-    e.preventDefault();
-    load();
-  };
+  const handleFilter = (e: React.FormEvent) => { e.preventDefault(); load(); };
 
-  const filtered =
-    verdict === "all" ? runs : runs.filter((r) => r.policy_verdict === verdict);
+  const filtered = verdict === "all" ? runs : runs.filter((r) => r.policy_verdict === verdict);
 
   return (
     <div>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 24 }}>
-        <h1 style={{ marginBottom: 0 }}>Runs</h1>
+      {/* Header */}
+      <div className="flex items-center justify-between mb-8">
+        <div>
+          <h1 className="text-2xl font-bold text-zinc-100">Runs</h1>
+          <p className="text-sm text-zinc-600 mt-0.5">Agent execution history</p>
+        </div>
         <button
           onClick={() => load(true)}
           disabled={refreshing}
-          style={{ background: "transparent", border: "1px solid #2a2a3a", color: "#aaa" }}
+          className="btn-ghost gap-2"
         >
           {refreshing ? "Refreshing..." : "↻ Refresh"}
         </button>
       </div>
 
-      <div className="card" style={{ display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap", marginBottom: 16 }}>
-        <form onSubmit={handleFilter} style={{ display: "flex", gap: 12, alignItems: "flex-end" }}>
-          <div className="form-group" style={{ marginBottom: 0 }}>
-            <label>Agent ID</label>
+      {/* Filter bar */}
+      <div className="glass-card p-4 mb-4 flex items-center gap-4 flex-wrap">
+        <form onSubmit={handleFilter} className="flex items-end gap-3">
+          <div>
+            <label className="form-label flex items-center gap-1.5">
+              <Filter size={10} /> Agent ID
+            </label>
             <input
+              className="form-input w-36"
               value={agentFilter}
               onChange={(e) => setAgentFilter(e.target.value)}
               placeholder="All agents"
-              style={{ width: 140 }}
             />
           </div>
-          <button type="submit" style={{ height: 40 }}>
+          <button type="submit" className="btn-primary py-2">
             Filter
           </button>
         </form>
 
-        <div style={{ display: "flex", gap: 8, marginLeft: "auto" }}>
+        {/* Verdict toggle */}
+        <div className="ml-auto flex items-center gap-1 bg-zinc-900 rounded-lg p-1 border border-zinc-800">
           {(["all", "pass", "fail"] as VerdictFilter[]).map((v) => (
             <button
               key={v}
               onClick={() => setVerdict(v)}
-              style={{
-                background:
-                  verdict === v
-                    ? v === "pass"
-                      ? "#1a3a1a"
-                      : v === "fail"
-                      ? "#3a1a1a"
-                      : "#1a1a3a"
-                    : "transparent",
-                border: "1px solid #2a2a3a",
-                color:
-                  verdict === v
-                    ? v === "pass"
-                      ? "#4caf50"
-                      : v === "fail"
-                      ? "#f44336"
-                      : "#6c63ff"
-                    : "#666",
-                padding: "6px 14px",
-                fontSize: 13,
-              }}
+              className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all cursor-pointer border-0 ${
+                verdict === v
+                  ? v === "pass"
+                    ? "bg-emerald-950 text-emerald-400 border border-emerald-900"
+                    : v === "fail"
+                    ? "bg-red-950 text-red-400 border border-red-900"
+                    : "bg-violet-950 text-violet-400 border border-violet-900"
+                  : "text-zinc-600 hover:text-zinc-300 bg-transparent"
+              }`}
             >
-              {v === "all" ? "All" : v.charAt(0).toUpperCase() + v.slice(1)}
+              {v.charAt(0).toUpperCase() + v.slice(1)}
             </button>
           ))}
         </div>
       </div>
 
       {loading ? (
-        <div style={{ textAlign: "center", paddingTop: 60, color: "#666" }}>Loading...</div>
+        <div className="flex items-center justify-center pt-16 text-zinc-600 text-sm">Loading...</div>
       ) : error ? (
-        <div style={{ background: "#1a0a0a", border: "1px solid #3a1a1a", borderRadius: 12, padding: 24, color: "#f44336" }}>
-          {error}
-        </div>
+        <div className="glass-card p-6 border-red-900/50 bg-red-950/20 text-red-400 text-sm">{error}</div>
       ) : (
-        <div className="card">
-          <div style={{ fontSize: 13, color: "#666", marginBottom: 12 }}>
-            {filtered.length} run{filtered.length !== 1 ? "s" : ""}
-            {verdict !== "all" ? ` (${verdict})` : ""}
+        <motion.div
+          className="glass-card overflow-hidden"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.2 }}
+        >
+          <div className="px-4 py-3 border-b border-zinc-800/60 flex items-center justify-between">
+            <span className="text-xs text-zinc-600">
+              {filtered.length} run{filtered.length !== 1 ? "s" : ""}
+              {verdict !== "all" ? ` (${verdict})` : ""}
+            </span>
           </div>
           {filtered.length === 0 ? (
-            <div style={{ textAlign: "center", padding: "40px 0", color: "#555" }}>
+            <div className="py-12 text-center text-zinc-600 text-sm">
               No runs match the current filter.
             </div>
           ) : (
-            <table>
+            <table className="data-table">
               <thead>
                 <tr>
                   <th>Run ID</th>
@@ -133,30 +130,34 @@ export default function Runs() {
               <tbody>
                 {filtered.map((r: any) => (
                   <tr key={r.run_id}>
-                    <td style={{ fontFamily: "monospace", fontSize: 13 }}>
-                      <Link to={`/runs/${r.run_id}`}>{r.run_id.substring(0, 16)}...</Link>
+                    <td>
+                      <Link to={`/runs/${r.run_id}`} className="font-mono text-xs text-violet-400">
+                        {r.run_id.substring(0, 16)}...
+                      </Link>
                     </td>
                     <td>
-                      <Link to={`/agents/${r.agent_id}`}>#{r.agent_id}</Link>
+                      <Link to={`/agents/${r.agent_id}`} className="text-xs text-zinc-400">
+                        #{r.agent_id}
+                      </Link>
                     </td>
                     <td>
-                      <span className={`badge badge-${r.policy_verdict === "pass" ? "pass" : "fail"}`}>
+                      <span className={`badge-${r.policy_verdict === "pass" ? "pass" : "fail"}`}>
                         {r.policy_verdict}
                       </span>
                     </td>
                     <td>
                       {r.reason_codes && r.reason_codes.length > 0 ? (
-                        <span style={{ fontSize: 12, color: "#f44336" }}>
+                        <span className="text-xs text-red-400 font-mono">
                           {r.reason_codes.join(", ")}
                         </span>
                       ) : (
-                        <span style={{ color: "#555" }}>—</span>
+                        <span className="text-zinc-700">—</span>
                       )}
                     </td>
-                    <td style={{ fontFamily: "monospace", fontSize: 12, color: "#aaa" }}>
+                    <td className="font-mono text-xs text-zinc-600">
                       {r.settlement_tx ? `${r.settlement_tx.substring(0, 14)}...` : "—"}
                     </td>
-                    <td style={{ fontSize: 13, color: "#aaa" }}>
+                    <td className="text-xs text-zinc-600">
                       {r.created_at ? new Date(r.created_at).toLocaleString() : "—"}
                     </td>
                   </tr>
@@ -164,7 +165,7 @@ export default function Runs() {
               </tbody>
             </table>
           )}
-        </div>
+        </motion.div>
       )}
     </div>
   );

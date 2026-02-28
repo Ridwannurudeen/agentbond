@@ -2,6 +2,8 @@ import React, { useEffect, useState } from "react";
 import { useSearchParams, Link } from "react-router-dom";
 import { fetchClaims, submitClaim } from "../api";
 import { useWallet } from "../context/WalletContext";
+import { FileWarning, CheckCircle2, XCircle } from "lucide-react";
+import { motion } from "framer-motion";
 
 const REASON_CODES = [
   "TOOL_WHITELIST_VIOLATION",
@@ -21,7 +23,6 @@ export default function Claims() {
   const [listError, setListError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  // Pre-fill from query params (e.g. linked from RunDetail)
   const [runId, setRunId] = useState(searchParams.get("runId") || "");
   const [agentId, setAgentId] = useState(searchParams.get("agentId") || "");
   const [claimantAddress, setClaimantAddress] = useState("");
@@ -29,9 +30,7 @@ export default function Claims() {
   const [result, setResult] = useState<any>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (address) setClaimantAddress(address);
-  }, [address]);
+  useEffect(() => { if (address) setClaimantAddress(address); }, [address]);
 
   useEffect(() => {
     fetchClaims()
@@ -56,105 +55,128 @@ export default function Claims() {
     setSubmitting(false);
   };
 
+  const claimStatusClass = (status: string) => {
+    if (status === "approved" || status === "paid") return "badge-pass";
+    if (status === "rejected") return "badge-fail";
+    return "badge-pending";
+  };
+
   return (
     <div>
-      <h1>Claims</h1>
-
-      <div className="card" style={{ marginBottom: 24 }}>
-        <h3 style={{ marginBottom: 16 }}>Submit a Claim</h3>
-        <form onSubmit={handleSubmit}>
-          <div className="form-group">
-            <label>Run ID</label>
-            <input
-              value={runId}
-              onChange={(e) => setRunId(e.target.value)}
-              placeholder="Run UUID"
-              required
-            />
-          </div>
-          <div className="form-group">
-            <label>Agent ID</label>
-            <input
-              value={agentId}
-              onChange={(e) => setAgentId(e.target.value)}
-              placeholder="1"
-              required
-            />
-          </div>
-          <div className="form-group">
-            <label>
-              Claimant Address{" "}
-              {address && (
-                <span style={{ fontSize: 12, color: "#6c63ff", fontWeight: 400 }}>
-                  (auto-filled from wallet)
-                </span>
-              )}
-            </label>
-            <input
-              value={claimantAddress}
-              onChange={(e) => setClaimantAddress(e.target.value)}
-              placeholder="0x..."
-              required
-            />
-          </div>
-          <div className="form-group">
-            <label>Reason Code</label>
-            <select
-              value={reasonCode}
-              onChange={(e) => setReasonCode(e.target.value)}
-              style={{
-                background: "#1a1a2e",
-                border: "1px solid #2a2a3a",
-                color: "#e0e0e0",
-                padding: "10px 14px",
-                borderRadius: 8,
-                width: "100%",
-                fontSize: 14,
-              }}
-            >
-              {REASON_CODES.map((code) => (
-                <option key={code} value={code}>{code}</option>
-              ))}
-            </select>
-          </div>
-          <button type="submit" disabled={submitting}>
-            {submitting ? "Submitting..." : "Submit Claim"}
-          </button>
-        </form>
-
-        {submitError && (
-          <div style={{ marginTop: 12, padding: 12, background: "#1a0a0a", borderRadius: 8, color: "#f44336", fontSize: 13 }}>
-            {submitError}
-          </div>
-        )}
-
-        {result && !submitError && (
-          <div style={{ marginTop: 12, padding: 12, background: "#0d0d15", borderRadius: 8, fontSize: 13 }}>
-            <p><strong>Claim ID:</strong> {result.claim_id}</p>
-            <p><strong>Status:</strong> {result.status}</p>
-            <p>
-              <strong>Approved:</strong>{" "}
-              <span style={{ color: result.approved ? "#4caf50" : "#f44336", fontWeight: 600 }}>
-                {result.approved ? "Yes" : "No"}
-              </span>
-            </p>
-            <p><strong>Reason:</strong> {result.reason}</p>
-          </div>
-        )}
+      {/* Header */}
+      <div className="mb-8">
+        <h1 className="text-2xl font-bold text-zinc-100">Claims</h1>
+        <p className="text-sm text-zinc-600 mt-0.5">Submit and track policy violation claims</p>
       </div>
 
-      <h2>Claim History</h2>
-      <div className="card">
-        {loading ? (
-          <div style={{ textAlign: "center", padding: "32px 0", color: "#666" }}>Loading...</div>
-        ) : listError ? (
-          <div style={{ color: "#f44336", padding: 16 }}>{listError}</div>
-        ) : claims.length === 0 ? (
-          <div style={{ textAlign: "center", padding: "40px 0", color: "#555" }}>
-            No claims filed yet.
+      <div className="grid grid-cols-[1fr,1.6fr] gap-6 mb-6">
+        {/* Submit form */}
+        <div className="glass-card p-6">
+          <div className="flex items-center gap-2 mb-5">
+            <div className="w-7 h-7 rounded-lg bg-red-950/60 flex items-center justify-center">
+              <FileWarning size={14} className="text-red-400" />
+            </div>
+            <h3 className="text-sm font-semibold text-zinc-100">Submit a Claim</h3>
           </div>
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <label className="form-label">Run ID</label>
+              <input className="form-input" value={runId} onChange={(e) => setRunId(e.target.value)} placeholder="Run UUID" required />
+            </div>
+            <div>
+              <label className="form-label">Agent ID</label>
+              <input className="form-input" value={agentId} onChange={(e) => setAgentId(e.target.value)} placeholder="1" required />
+            </div>
+            <div>
+              <label className="form-label flex items-center gap-1.5">
+                Claimant Address
+                {address && <span className="text-violet-500 font-normal normal-case tracking-normal">· auto-filled</span>}
+              </label>
+              <input className="form-input font-mono" value={claimantAddress} onChange={(e) => setClaimantAddress(e.target.value)} placeholder="0x..." required />
+            </div>
+            <div>
+              <label className="form-label">Reason Code</label>
+              <select
+                className="form-input"
+                value={reasonCode}
+                onChange={(e) => setReasonCode(e.target.value)}
+              >
+                {REASON_CODES.map((code) => (
+                  <option key={code} value={code} className="bg-zinc-900">{code}</option>
+                ))}
+              </select>
+            </div>
+            <button type="submit" disabled={submitting} className="btn-danger w-full justify-center">
+              {submitting ? "Submitting..." : "Submit Claim"}
+            </button>
+          </form>
+
+          {/* Feedback */}
+          {submitError && (
+            <motion.div
+              initial={{ opacity: 0, y: 4 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mt-4 p-3 rounded-lg bg-red-950/40 border border-red-900/50 text-red-400 text-xs flex items-start gap-2"
+            >
+              <XCircle size={13} className="mt-0.5 flex-shrink-0" />
+              {submitError}
+            </motion.div>
+          )}
+          {result && !submitError && (
+            <motion.div
+              initial={{ opacity: 0, y: 4 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mt-4 p-4 rounded-lg bg-zinc-900 border border-zinc-700 text-xs space-y-1.5"
+            >
+              <div className="flex items-center gap-2 mb-2">
+                <CheckCircle2 size={14} className="text-emerald-400" />
+                <span className="text-zinc-200 font-medium">Claim submitted</span>
+              </div>
+              <div className="flex justify-between text-zinc-500"><span>Claim ID</span><span className="text-zinc-300 font-mono">#{result.claim_id}</span></div>
+              <div className="flex justify-between text-zinc-500"><span>Status</span><span className="text-zinc-300">{result.status}</span></div>
+              <div className="flex justify-between text-zinc-500">
+                <span>Approved</span>
+                <span className={result.approved ? "text-emerald-400" : "text-red-400"}>
+                  {result.approved ? "Yes" : "No"}
+                </span>
+              </div>
+              <div className="flex justify-between text-zinc-500"><span>Reason</span><span className="text-zinc-300">{result.reason}</span></div>
+            </motion.div>
+          )}
+        </div>
+
+        {/* Quick guide */}
+        <div className="glass-card p-6">
+          <h3 className="text-sm font-semibold text-zinc-400 mb-4">Reason Codes</h3>
+          <div className="space-y-2">
+            {[
+              { code: "TOOL_WHITELIST_VIOLATION", desc: "Used tool not in policy" },
+              { code: "VALUE_LIMIT_EXCEEDED", desc: "Action exceeded max value" },
+              { code: "PROHIBITED_TARGET", desc: "Interacted with blocked address" },
+              { code: "FREQUENCY_EXCEEDED", desc: "Too many actions in time window" },
+              { code: "STALE_DATA", desc: "Data older than freshness requirement" },
+              { code: "MODEL_MISMATCH", desc: "Declared model ≠ executed model" },
+            ].map(({ code, desc }) => (
+              <div key={code} className="flex items-start gap-3 py-2 border-b border-zinc-800/50 last:border-0">
+                <span className="font-mono text-[10px] text-violet-400 bg-violet-950/40 px-2 py-0.5 rounded mt-0.5 flex-shrink-0">{code}</span>
+                <span className="text-xs text-zinc-600">{desc}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Claims history */}
+      <h2 className="text-base font-semibold text-zinc-100 mb-3">Claim History</h2>
+      <div className="glass-card overflow-hidden">
+        {loading ? (
+          <div className="py-10 text-center text-zinc-600 text-sm">Loading...</div>
+        ) : listError ? (
+          <div className="p-6 text-red-400 text-sm">{listError}</div>
+        ) : claims.length === 0 ? (
+          <div className="py-12 text-center text-zinc-600 text-sm">No claims filed yet.</div>
         ) : (
-          <table>
+          <table className="data-table">
             <thead>
               <tr>
                 <th>ID</th>
@@ -168,32 +190,26 @@ export default function Claims() {
             <tbody>
               {claims.map((c: any) => (
                 <tr key={c.id}>
-                  <td>#{c.id}</td>
+                  <td className="text-zinc-400 font-mono text-xs">#{c.id}</td>
                   <td>
-                    <Link to={`/agents/${c.agent_id}`}>#{c.agent_id}</Link>
+                    <Link to={`/agents/${c.agent_id}`} className="text-xs">#{c.agent_id}</Link>
                   </td>
-                  <td style={{ fontFamily: "monospace", fontSize: 12 }}>
+                  <td>
                     {c.run_id ? (
-                      <Link to={`/runs/${c.run_id}`} style={{ color: "#6c63ff" }}>
+                      <Link to={`/runs/${c.run_id}`} className="font-mono text-xs text-violet-400">
                         {c.run_id.substring(0, 10)}...
                       </Link>
-                    ) : "—"}
+                    ) : <span className="text-zinc-700">—</span>}
                   </td>
-                  <td style={{ fontSize: 13 }}>{c.reason_code}</td>
                   <td>
-                    <span
-                      className={`badge ${
-                        c.status === "approved" || c.status === "paid"
-                          ? "badge-pass"
-                          : c.status === "rejected"
-                          ? "badge-fail"
-                          : "badge-pending"
-                      }`}
-                    >
-                      {c.status}
+                    <span className="font-mono text-[10px] text-zinc-500 bg-zinc-800/60 px-2 py-0.5 rounded">
+                      {c.reason_code}
                     </span>
                   </td>
-                  <td style={{ fontSize: 13, color: "#aaa" }}>
+                  <td>
+                    <span className={claimStatusClass(c.status)}>{c.status}</span>
+                  </td>
+                  <td className="text-xs text-zinc-600">
                     {c.created_at ? new Date(c.created_at).toLocaleString() : "—"}
                   </td>
                 </tr>

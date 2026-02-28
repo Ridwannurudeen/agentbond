@@ -1,20 +1,48 @@
 import React, { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import {
-  fetchAgent,
-  fetchRuns,
-  fetchClaims,
-  fetchScore,
-  fetchPolicies,
-  executeRun,
-  activatePolicy,
+  fetchAgent, fetchRuns, fetchClaims, fetchScore, fetchPolicies, executeRun, activatePolicy,
 } from "../api";
+import { ChevronLeft, Play, Activity, FileWarning, ShieldCheck, TrendingUp, ExternalLink } from "lucide-react";
+import { motion } from "framer-motion";
 
-function ScoreRing({ score }: { score: number }) {
-  const color = score >= 80 ? "#4caf50" : score >= 60 ? "#ff9800" : "#f44336";
+// ── Identicon ────────────────────────────────────────────────────────────────
+function Identicon({ id, size = 48 }: { id: number; size?: number }) {
+  const hue = (id * 137.508) % 360;
+  const color = `hsl(${hue}, 55%, 58%)`;
+  const seed = id * 2654435761;
+  const cells = Array.from({ length: 15 }, (_, i) => !!(seed & (1 << (i % 30))));
+  const grid: boolean[][] = [];
+  for (let y = 0; y < 5; y++) {
+    grid.push([cells[y * 3], cells[y * 3 + 1], cells[y * 3 + 2], cells[y * 3 + 1], cells[y * 3]]);
+  }
+  const cs = size / 5;
   return (
-    <div className="score-ring" style={{ borderColor: color, color, width: 64, height: 64, fontSize: 22 }}>
-      {score}
+    <svg width={size} height={size} style={{ borderRadius: 10, display: "block" }}>
+      <rect width={size} height={size} fill="#18181b" />
+      {grid.map((row, y) =>
+        row.map((filled, x) =>
+          filled ? <rect key={`${x}-${y}`} x={x * cs} y={y * cs} width={cs} height={cs} fill={color} /> : null
+        )
+      )}
+    </svg>
+  );
+}
+
+// ── Score ring ───────────────────────────────────────────────────────────────
+function ScoreRing({ score }: { score: number }) {
+  const color = score >= 80 ? "#10b981" : score >= 60 ? "#f59e0b" : "#ef4444";
+  const textColor = score >= 80 ? "text-emerald-400" : score >= 60 ? "text-amber-400" : "text-red-400";
+  const r = 28;
+  const circ = 2 * Math.PI * r;
+  return (
+    <div className="relative flex items-center justify-center" style={{ width: 72, height: 72 }}>
+      <svg width={72} height={72} className="absolute -rotate-90">
+        <circle cx={36} cy={36} r={r} fill="none" stroke="#27272a" strokeWidth={5} />
+        <circle cx={36} cy={36} r={r} fill="none" stroke={color} strokeWidth={5}
+          strokeDasharray={`${(score / 100) * circ} ${circ}`} strokeLinecap="round" />
+      </svg>
+      <span className={`text-lg font-bold tabular-nums z-10 ${textColor}`}>{score}</span>
     </div>
   );
 }
@@ -30,7 +58,6 @@ export default function AgentDetail() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Run executor state
   const [userInput, setUserInput] = useState("");
   const [running, setRunning] = useState(false);
   const [runResult, setRunResult] = useState<any>(null);
@@ -39,20 +66,8 @@ export default function AgentDetail() {
   useEffect(() => {
     if (!id) return;
     const agentId = parseInt(id);
-    Promise.all([
-      fetchAgent(agentId),
-      fetchRuns(agentId),
-      fetchClaims(agentId),
-      fetchScore(agentId),
-      fetchPolicies(agentId),
-    ])
-      .then(([a, r, c, s, p]) => {
-        setAgent(a);
-        setRuns(r);
-        setClaims(c);
-        setScore(s);
-        setPolicies(p);
-      })
+    Promise.all([fetchAgent(agentId), fetchRuns(agentId), fetchClaims(agentId), fetchScore(agentId), fetchPolicies(agentId)])
+      .then(([a, r, c, s, p]) => { setAgent(a); setRuns(r); setClaims(c); setScore(s); setPolicies(p); })
       .catch((err) => setError(err.response?.data?.detail || err.message || "Failed to load agent"))
       .finally(() => setLoading(false));
   }, [id]);
@@ -60,22 +75,13 @@ export default function AgentDetail() {
   const handleRun = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!id) return;
-    setRunning(true);
-    setRunResult(null);
-    setRunError(null);
+    setRunning(true); setRunResult(null); setRunError(null);
     try {
       const res = await executeRun(parseInt(id), userInput);
       setRunResult(res);
-      // Refresh runs list and agent stats
-      const [updatedRuns, updatedAgent] = await Promise.all([
-        fetchRuns(parseInt(id)),
-        fetchAgent(parseInt(id)),
-      ]);
-      setRuns(updatedRuns);
-      setAgent(updatedAgent);
-    } catch (err: any) {
-      setRunError(err.response?.data?.detail || err.message || "Run failed");
-    }
+      const [updatedRuns, updatedAgent] = await Promise.all([fetchRuns(parseInt(id)), fetchAgent(parseInt(id))]);
+      setRuns(updatedRuns); setAgent(updatedAgent);
+    } catch (err: any) { setRunError(err.response?.data?.detail || err.message || "Run failed"); }
     setRunning(false);
   };
 
@@ -84,154 +90,129 @@ export default function AgentDetail() {
       await activatePolicy(policyId);
       const updated = await fetchPolicies(parseInt(id!));
       setPolicies(updated);
-    } catch (err: any) {
-      alert(err.response?.data?.detail || err.message);
-    }
+    } catch (err: any) { alert(err.response?.data?.detail || err.message); }
   };
 
   if (loading)
-    return <div style={{ textAlign: "center", paddingTop: 80, color: "#666" }}>Loading...</div>;
+    return <div className="flex items-center justify-center pt-20 text-zinc-600 text-sm">Loading...</div>;
   if (error)
-    return (
-      <div style={{ background: "#1a0a0a", border: "1px solid #3a1a1a", borderRadius: 12, padding: 32, color: "#f44336" }}>
-        {error}
-      </div>
-    );
+    return <div className="glass-card p-8 border-red-900/50 bg-red-950/20 text-red-400 text-sm">{error}</div>;
   if (!agent)
-    return <div style={{ color: "#666", paddingTop: 40 }}>Agent not found.</div>;
+    return <div className="text-zinc-600 pt-10">Agent not found.</div>;
+
+  const activePolicy = policies.find((p) => p.status === "active");
 
   return (
     <div>
-      <div style={{ marginBottom: 8 }}>
-        <Link to="/" style={{ fontSize: 13, color: "#666" }}>← Dashboard</Link>
-      </div>
+      {/* Back */}
+      <Link to="/" className="inline-flex items-center gap-1.5 text-xs text-zinc-600 hover:text-zinc-300 no-underline mb-6 transition-colors">
+        <ChevronLeft size={14} /> Dashboard
+      </Link>
 
-      <div style={{ display: "flex", alignItems: "center", gap: 20, marginBottom: 28 }}>
-        <ScoreRing score={agent.trust_score} />
-        <div>
-          <h1 style={{ marginBottom: 4 }}>Agent #{agent.id}</h1>
-          <span className={`badge badge-${agent.status === "active" ? "active" : "fail"}`}>
-            {agent.status}
-          </span>
-        </div>
-      </div>
-
-      <div className="grid" style={{ marginBottom: 24 }}>
-        <div className="stat-card">
-          <h3>Total Runs</h3>
-          <div className="value">{agent.total_runs}</div>
-        </div>
-        <div className="stat-card">
-          <h3>Violations</h3>
-          <div className="value" style={{ color: agent.violations > 0 ? "#f44336" : "#4caf50" }}>
-            {agent.violations}
-          </div>
-        </div>
-        <div className="stat-card">
-          <h3>Active Policy</h3>
-          <div style={{ fontSize: 18, fontWeight: 700, color: "#6c63ff", marginTop: 8 }}>
-            {policies.find((p) => p.status === "active") ? "Yes" : "None"}
-          </div>
-        </div>
-        <div className="stat-card">
-          <h3>Operator ID</h3>
-          <div style={{ fontSize: 12, color: "#aaa", marginTop: 8, wordBreak: "break-all", fontFamily: "monospace" }}>
-            {agent.operator_id}
-          </div>
-        </div>
-      </div>
-
-      <div className="card" style={{ marginBottom: 16 }}>
-        <div style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 13 }}>
+      {/* Agent hero */}
+      <motion.div className="glass-card p-6 mb-5 flex items-center justify-between" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
+        <div className="flex items-center gap-5">
+          <Identicon id={agent.id} size={52} />
           <div>
-            <span style={{ color: "#666" }}>Metadata URI: </span>
-            <span style={{ color: "#ccc" }}>{agent.metadata_uri}</span>
-          </div>
-          {agent.active_version && (
-            <div>
-              <span style={{ color: "#666" }}>Active Version: </span>
-              <span style={{ color: "#ccc" }}>{agent.active_version}</span>
+            <div className="flex items-center gap-3 mb-1">
+              <h1 className="text-xl font-bold text-zinc-100">Agent #{agent.id}</h1>
+              {agent.status === "active" ? (
+                <span className="badge-active flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-blue-400 pulse-dot" />
+                  {agent.status}
+                </span>
+              ) : (
+                <span className="badge-fail">{agent.status}</span>
+              )}
             </div>
-          )}
-          <div>
-            <span style={{ color: "#666" }}>Registered: </span>
-            <span style={{ color: "#aaa" }}>
-              {agent.created_at ? new Date(agent.created_at).toLocaleString() : "—"}
-            </span>
+            <p className="text-xs text-zinc-600 font-mono">{agent.metadata_uri}</p>
+            {agent.active_version && (
+              <p className="text-xs text-zinc-600 mt-0.5">v{agent.active_version}</p>
+            )}
           </div>
         </div>
+        <ScoreRing score={agent.trust_score} />
+      </motion.div>
+
+      {/* Stat grid */}
+      <div className="grid grid-cols-4 gap-4 mb-5">
+        {[
+          { label: "Total Runs", value: agent.total_runs, icon: Activity, color: "text-zinc-100" },
+          { label: "Violations", value: agent.violations, icon: FileWarning, color: agent.violations > 0 ? "text-red-400" : "text-emerald-400" },
+          { label: "Active Policy", value: activePolicy ? "Yes" : "None", icon: ShieldCheck, color: activePolicy ? "text-emerald-400" : "text-zinc-600" },
+          { label: "Operator ID", value: `#${agent.operator_id}`, icon: TrendingUp, color: "text-violet-400" },
+        ].map(({ label, value, icon: Icon, color }) => (
+          <motion.div key={label} className="glass-card p-4" whileHover={{ y: -2 }} transition={{ duration: 0.15 }}>
+            <div className="flex items-center justify-between mb-2">
+              <span className="stat-label">{label}</span>
+              <Icon size={13} className="text-zinc-700" />
+            </div>
+            <div className={`text-2xl font-bold tabular-nums ${color}`}>{value}</div>
+          </motion.div>
+        ))}
       </div>
 
+      {/* Score breakdown */}
       {score?.breakdown && (
-        <div className="card" style={{ marginBottom: 16 }}>
-          <h3 style={{ marginBottom: 16 }}>Score Breakdown</h3>
-          <div style={{ display: "flex", gap: 32, flexWrap: "wrap" }}>
+        <div className="glass-card p-5 mb-5">
+          <h3 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-4">Score Breakdown</h3>
+          <div className="flex gap-8">
             {[
               { label: "Base", value: `${score.breakdown.base}`, positive: true },
               { label: "Violation Penalty", value: `-${score.breakdown.violation_penalty}`, positive: score.breakdown.violation_penalty === 0 },
               { label: "Claim Penalty", value: `-${score.breakdown.claim_penalty}`, positive: score.breakdown.claim_penalty === 0 },
               { label: "Recency Bonus", value: `+${score.breakdown.recency_bonus}`, positive: true },
             ].map(({ label, value, positive }) => (
-              <div key={label} style={{ textAlign: "center" }}>
-                <div style={{ fontSize: 12, color: "#666", marginBottom: 4 }}>{label}</div>
-                <div style={{ fontSize: 20, fontWeight: 700, color: positive ? "#4caf50" : "#f44336" }}>
-                  {value}
-                </div>
+              <div key={label} className="text-center">
+                <div className="text-xs text-zinc-600 mb-1">{label}</div>
+                <div className={`text-xl font-bold tabular-nums ${positive ? "text-emerald-400" : "text-red-400"}`}>{value}</div>
               </div>
             ))}
           </div>
         </div>
       )}
 
-      {/* Execute Run */}
-      <div className="card" style={{ marginBottom: 16 }}>
-        <h3 style={{ marginBottom: 12 }}>Execute Run</h3>
-        <form onSubmit={handleRun}>
-          <div className="form-group">
-            <label>User Input</label>
+      {/* Execute run */}
+      <div className="glass-card p-5 mb-5">
+        <div className="flex items-center gap-2 mb-4">
+          <Play size={14} className="text-violet-400" />
+          <h3 className="text-sm font-semibold text-zinc-100">Execute Run</h3>
+        </div>
+        <form onSubmit={handleRun} className="flex gap-3 items-end">
+          <div className="flex-1">
+            <label className="form-label">User Input</label>
             <textarea
+              className="form-input"
               value={userInput}
               onChange={(e) => setUserInput(e.target.value)}
-              rows={3}
+              rows={2}
               placeholder="What is the current price of ETH?"
               required
             />
           </div>
-          <button type="submit" disabled={running || agent.status !== "active"}>
-            {running ? "Running..." : "▶ Execute"}
+          <button type="submit" disabled={running || agent.status !== "active"} className="btn-primary flex-shrink-0 self-end">
+            <Play size={13} />
+            {running ? "Running..." : "Execute"}
           </button>
-          {agent.status !== "active" && (
-            <span style={{ marginLeft: 12, fontSize: 13, color: "#888" }}>
-              Agent must be active to run
-            </span>
-          )}
         </form>
-
-        {runError && (
-          <div style={{ marginTop: 12, padding: 12, background: "#1a0a0a", borderRadius: 8, color: "#f44336", fontSize: 13 }}>
-            {runError}
-          </div>
+        {agent.status !== "active" && (
+          <p className="text-xs text-zinc-600 mt-2">Agent must be active to run.</p>
         )}
-
+        {runError && (
+          <div className="mt-3 p-3 rounded-lg bg-red-950/30 border border-red-900/50 text-red-400 text-xs">{runError}</div>
+        )}
         {runResult && (
-          <div style={{ marginTop: 12 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8 }}>
-              <span
-                className={`badge badge-${runResult.policy_verdict === "pass" ? "pass" : "fail"}`}
-                style={{ fontSize: 14 }}
-              >
-                {runResult.policy_verdict}
-              </span>
-              <Link to={`/runs/${runResult.run_id}`} style={{ fontSize: 13, color: "#6c63ff" }}>
-                View run details →
-              </Link>
-            </div>
+          <div className="mt-3 flex items-center gap-3">
+            <span className={`badge-${runResult.policy_verdict === "pass" ? "pass" : "fail"} text-sm`}>
+              {runResult.policy_verdict}
+            </span>
+            <Link to={`/runs/${runResult.run_id}`} className="text-xs text-violet-400 flex items-center gap-1">
+              View run details <ExternalLink size={11} />
+            </Link>
             {runResult.reason_codes?.length > 0 && (
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <div className="flex gap-1.5">
                 {runResult.reason_codes.map((code: string, i: number) => (
-                  <span key={i} className="badge badge-fail" style={{ fontSize: 12 }}>
-                    {code}
-                  </span>
+                  <span key={i} className="badge-fail text-xs">{code}</span>
                 ))}
               </div>
             )}
@@ -240,48 +221,23 @@ export default function AgentDetail() {
       </div>
 
       {/* Policies */}
-      <h2>Policies</h2>
-      <div className="card" style={{ marginBottom: 16 }}>
+      <h2 className="text-base font-semibold text-zinc-100 mb-3">Policies</h2>
+      <div className="glass-card overflow-hidden mb-5">
         {policies.length === 0 ? (
-          <div style={{ color: "#555", padding: "16px 0" }}>No policies registered.</div>
+          <div className="py-8 text-center text-zinc-600 text-sm">No policies registered.</div>
         ) : (
-          <table>
-            <thead>
-              <tr>
-                <th>ID</th>
-                <th>Hash</th>
-                <th>Status</th>
-                <th>Created</th>
-                <th></th>
-              </tr>
-            </thead>
+          <table className="data-table">
+            <thead><tr><th>ID</th><th>Hash</th><th>Status</th><th>Created</th><th></th></tr></thead>
             <tbody>
               {policies.map((p: any) => (
                 <tr key={p.id}>
-                  <td>#{p.id}</td>
-                  <td style={{ fontFamily: "monospace", fontSize: 12, color: "#aaa" }}>
-                    {p.policy_hash?.substring(0, 16)}...
-                  </td>
-                  <td>
-                    <span className={`badge badge-${p.status === "active" ? "active" : "pending"}`}>
-                      {p.status}
-                    </span>
-                  </td>
-                  <td style={{ fontSize: 13, color: "#aaa" }}>
-                    {p.created_at ? new Date(p.created_at).toLocaleString() : "—"}
-                  </td>
+                  <td className="text-zinc-400 font-mono text-xs">#{p.id}</td>
+                  <td className="font-mono text-xs text-zinc-600">{p.policy_hash?.substring(0, 16)}...</td>
+                  <td><span className={`badge-${p.status === "active" ? "active" : "pending"}`}>{p.status}</span></td>
+                  <td className="text-xs text-zinc-600">{p.created_at ? new Date(p.created_at).toLocaleString() : "—"}</td>
                   <td>
                     {p.status !== "active" && (
-                      <button
-                        onClick={() => handleActivatePolicy(p.id)}
-                        style={{
-                          padding: "4px 10px",
-                          fontSize: 12,
-                          background: "transparent",
-                          border: "1px solid #6c63ff",
-                          color: "#6c63ff",
-                        }}
-                      >
+                      <button onClick={() => handleActivatePolicy(p.id)} className="btn-ghost py-1 px-2 text-xs">
                         Activate
                       </button>
                     )}
@@ -294,40 +250,23 @@ export default function AgentDetail() {
       </div>
 
       {/* Runs */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-        <h2 style={{ marginBottom: 0 }}>Runs</h2>
-        <Link to="/runs" style={{ fontSize: 13, color: "#6c63ff" }}>View all →</Link>
+      <div className="flex items-center justify-between mb-3">
+        <h2 className="text-base font-semibold text-zinc-100">Runs</h2>
+        <Link to="/runs" className="text-xs text-zinc-600 hover:text-violet-400 no-underline transition-colors">View all →</Link>
       </div>
-      <div className="card" style={{ marginBottom: 16 }}>
+      <div className="glass-card overflow-hidden mb-5">
         {runs.length === 0 ? (
-          <div style={{ color: "#555", padding: "16px 0" }}>No runs yet.</div>
+          <div className="py-8 text-center text-zinc-600 text-sm">No runs yet.</div>
         ) : (
-          <table>
-            <thead>
-              <tr>
-                <th>Run ID</th>
-                <th>Verdict</th>
-                <th>Settlement TX</th>
-                <th>Time</th>
-              </tr>
-            </thead>
+          <table className="data-table">
+            <thead><tr><th>Run ID</th><th>Verdict</th><th>Settlement TX</th><th>Time</th></tr></thead>
             <tbody>
               {runs.slice(0, 20).map((r: any) => (
                 <tr key={r.run_id}>
-                  <td style={{ fontFamily: "monospace", fontSize: 13 }}>
-                    <Link to={`/runs/${r.run_id}`}>{r.run_id.substring(0, 14)}...</Link>
-                  </td>
-                  <td>
-                    <span className={`badge badge-${r.policy_verdict === "pass" ? "pass" : "fail"}`}>
-                      {r.policy_verdict}
-                    </span>
-                  </td>
-                  <td style={{ fontFamily: "monospace", fontSize: 12, color: "#aaa" }}>
-                    {r.settlement_tx?.substring(0, 14) || "—"}
-                  </td>
-                  <td style={{ fontSize: 13, color: "#aaa" }}>
-                    {r.created_at ? new Date(r.created_at).toLocaleString() : "—"}
-                  </td>
+                  <td><Link to={`/runs/${r.run_id}`} className="font-mono text-xs text-violet-400">{r.run_id.substring(0, 14)}...</Link></td>
+                  <td><span className={`badge-${r.policy_verdict === "pass" ? "pass" : "fail"}`}>{r.policy_verdict}</span></td>
+                  <td className="font-mono text-xs text-zinc-600">{r.settlement_tx?.substring(0, 14) || "—"}</td>
+                  <td className="text-xs text-zinc-600">{r.created_at ? new Date(r.created_at).toLocaleString() : "—"}</td>
                 </tr>
               ))}
             </tbody>
@@ -336,44 +275,27 @@ export default function AgentDetail() {
       </div>
 
       {/* Claims */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-        <h2 style={{ marginBottom: 0 }}>Claims</h2>
-        <Link to="/claims" style={{ fontSize: 13, color: "#6c63ff" }}>Submit claim →</Link>
+      <div className="flex items-center justify-between mb-3">
+        <h2 className="text-base font-semibold text-zinc-100">Claims</h2>
+        <Link to="/claims" className="text-xs text-zinc-600 hover:text-violet-400 no-underline transition-colors">Submit claim →</Link>
       </div>
-      <div className="card">
+      <div className="glass-card overflow-hidden">
         {claims.length === 0 ? (
-          <div style={{ color: "#555", padding: "16px 0" }}>No claims filed.</div>
+          <div className="py-8 text-center text-zinc-600 text-sm">No claims filed.</div>
         ) : (
-          <table>
-            <thead>
-              <tr>
-                <th>ID</th>
-                <th>Reason</th>
-                <th>Status</th>
-                <th>Created</th>
-              </tr>
-            </thead>
+          <table className="data-table">
+            <thead><tr><th>ID</th><th>Reason</th><th>Status</th><th>Created</th></tr></thead>
             <tbody>
               {claims.map((c: any) => (
                 <tr key={c.id}>
-                  <td>#{c.id}</td>
-                  <td style={{ fontSize: 13 }}>{c.reason_code}</td>
+                  <td className="text-zinc-400 font-mono text-xs">#{c.id}</td>
+                  <td><span className="font-mono text-[10px] text-zinc-500 bg-zinc-800/60 px-1.5 py-0.5 rounded">{c.reason_code}</span></td>
                   <td>
-                    <span
-                      className={`badge ${
-                        c.status === "approved" || c.status === "paid"
-                          ? "badge-pass"
-                          : c.status === "rejected"
-                          ? "badge-fail"
-                          : "badge-pending"
-                      }`}
-                    >
+                    <span className={`badge-${c.status === "approved" || c.status === "paid" ? "pass" : c.status === "rejected" ? "fail" : "pending"}`}>
                       {c.status}
                     </span>
                   </td>
-                  <td style={{ fontSize: 13, color: "#aaa" }}>
-                    {c.created_at ? new Date(c.created_at).toLocaleString() : "—"}
-                  </td>
+                  <td className="text-xs text-zinc-600">{c.created_at ? new Date(c.created_at).toLocaleString() : "—"}</td>
                 </tr>
               ))}
             </tbody>

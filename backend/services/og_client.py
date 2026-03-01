@@ -171,20 +171,22 @@ TOOL_DEFINITIONS = {
 }
 
 # Default model to use for real inference
-DEFAULT_MODEL = "GPT_4O"
+DEFAULT_MODEL = "CLAUDE_SONNET_4_6"
 
-# Model name mapping
+# Model name mapping (aligned with og.TEE_LLM enum in opengradient>=0.7.5)
 MODEL_MAP = {
-    "GPT_4O": "openai/gpt-4o",
+    "CLAUDE_SONNET_4_6": "anthropic/claude-sonnet-4-6",
+    "CLAUDE_HAIKU_4_5": "anthropic/claude-haiku-4-5",
+    "CLAUDE_OPUS_4_6": "anthropic/claude-opus-4-6",
     "GPT_4_1": "openai/gpt-4.1-2025-04-14",
     "O4_MINI": "openai/o4-mini",
-    "CLAUDE_3_7_SONNET": "anthropic/claude-3.7-sonnet",
-    "CLAUDE_3_5_HAIKU": "anthropic/claude-3.5-haiku",
-    "CLAUDE_4_0_SONNET": "anthropic/claude-4.0-sonnet",
     "GEMINI_2_5_FLASH": "google/gemini-2.5-flash",
     "GEMINI_2_5_PRO": "google/gemini-2.5-pro",
-    "GEMINI_2_0_FLASH": "google/gemini-2.0-flash",
-    "GROK_3_BETA": "x-ai/grok-3-beta",
+    "GROK_4": "x-ai/grok-4",
+    # Legacy aliases
+    "GPT_4O": "openai/gpt-4.1-2025-04-14",
+    "CLAUDE_3_7_SONNET": "anthropic/claude-sonnet-4-6",
+    "CLAUDE_3_5_HAIKU": "anthropic/claude-haiku-4-5",
 }
 
 
@@ -384,9 +386,9 @@ class OGExecutionClient:
         for member in og.TEE_LLM:
             if member.value == model_id:
                 return member
-        # Default to GPT_4O
-        logger.warning(f"Unknown model '{model_id}', defaulting to GPT_4O")
-        return og.TEE_LLM.GPT_4O
+        # Default to Claude Sonnet
+        logger.warning(f"Unknown model '{model_id}', defaulting to CLAUDE_SONNET_4_6")
+        return og.TEE_LLM.CLAUDE_SONNET_4_6
 
     def _mock_run(
         self,

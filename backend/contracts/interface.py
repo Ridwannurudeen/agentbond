@@ -2,6 +2,7 @@
 
 import json
 import logging
+import threading
 from pathlib import Path
 from web3 import Web3
 from web3.middleware import ExtraDataToPOAMiddleware
@@ -60,6 +61,7 @@ class ContractInterface:
     def __init__(self):
         self.w3 = Web3(Web3.HTTPProvider(settings.contract_rpc_url))
         self.w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
+        self._tx_lock = threading.Lock()  # serialize TX submissions to avoid nonce races
 
         self._account = None
         if settings.og_private_key:
@@ -99,20 +101,23 @@ class ContractInterface:
         )
 
     def _send_tx(self, func, value=0):
-        """Build, sign, and send a transaction."""
+        """Build, sign, and send a transaction. Serialized via lock to prevent nonce races."""
         if not self._account:
             raise RuntimeError("No private key configured")
 
-        tx = func.build_transaction({
-            "from": self._account.address,
-            "nonce": self.w3.eth.get_transaction_count(self._account.address),
-            "gas": 500_000,
-            "gasPrice": self.w3.eth.gas_price,
-            "chainId": settings.contract_chain_id,
-            "value": value,
-        })
-        signed = self._account.sign_transaction(tx)
-        tx_hash = self.w3.eth.send_raw_transaction(signed.raw_transaction)
+        with self._tx_lock:
+            # Use 'pending' to include unconfirmed TXs in nonce count
+            nonce = self.w3.eth.get_transaction_count(self._account.address, "pending")
+            tx = func.build_transaction({
+                "from": self._account.address,
+                "nonce": nonce,
+                "gas": 500_000,
+                "gasPrice": self.w3.eth.gas_price,
+                "chainId": settings.contract_chain_id,
+                "value": value,
+            })
+            signed = self._account.sign_transaction(tx)
+            tx_hash = self.w3.eth.send_raw_transaction(signed.raw_transaction)
         receipt = self.w3.eth.wait_for_transaction_receipt(tx_hash)
         logger.info(f"TX confirmed: {tx_hash.hex()} (block {receipt.blockNumber})")
         return receipt

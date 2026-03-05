@@ -43,28 +43,47 @@ class MetricsMiddleware(BaseHTTPMiddleware):
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
-    """Simple in-memory rate limiter per IP address."""
+    """In-memory rate limiter — enforces limits per IP and per API key.
 
-    def __init__(self, app, requests_per_minute: int = 60):
+    - Global IP limit: requests_per_minute (default 120)
+    - Per-operator limit: operator_rpm (default 30) — applied when X-API-Key is present
+    """
+
+    def __init__(self, app, requests_per_minute: int = 120, operator_rpm: int = 30):
         super().__init__(app)
         self.rpm = requests_per_minute
+        self.operator_rpm = operator_rpm
         self.requests: dict[str, list[float]] = defaultdict(list)
 
-    async def dispatch(self, request: Request, call_next):
-        client_ip = request.client.host if request.client else "unknown"
-        now = time.time()
+    def _check(self, key: str, limit: int, now: float) -> bool:
+        """Return True if request should be allowed, False if rate-limited."""
         window_start = now - 60
+        self.requests[key] = [t for t in self.requests[key] if t > window_start]
+        if len(self.requests[key]) >= limit:
+            return False
+        self.requests[key].append(now)
+        return True
 
-        self.requests[client_ip] = [
-            t for t in self.requests[client_ip] if t > window_start
-        ]
+    async def dispatch(self, request: Request, call_next):
+        now = time.time()
+        client_ip = request.client.host if request.client else "unknown"
 
-        if len(self.requests[client_ip]) >= self.rpm:
+        # IP-level check
+        if not self._check(f"ip:{client_ip}", self.rpm, now):
             RATE_LIMIT_HITS_TOTAL.inc()
             return JSONResponse(
                 status_code=429,
                 content={"detail": "Rate limit exceeded. Try again later."},
             )
 
-        self.requests[client_ip].append(now)
+        # Per-operator check (keyed by API key, not IP)
+        api_key = request.headers.get("x-api-key") or request.headers.get("X-API-Key")
+        if api_key:
+            if not self._check(f"key:{api_key}", self.operator_rpm, now):
+                RATE_LIMIT_HITS_TOTAL.inc()
+                return JSONResponse(
+                    status_code=429,
+                    content={"detail": "Operator rate limit exceeded. Max 30 requests/min."},
+                )
+
         return await call_next(request)

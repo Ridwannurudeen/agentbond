@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import {
-  fetchAgent, fetchRuns, fetchClaims, fetchScore, fetchPolicies, executeRun, activatePolicy,
+  fetchAgent, fetchRuns, fetchClaims, fetchScore, fetchPolicies, activatePolicy,
+  fetchAgentMemories, streamRun,
 } from "../api";
-import { ChevronLeft, Play, Activity, FileWarning, ShieldCheck, TrendingUp, ExternalLink } from "lucide-react";
+import { ChevronLeft, Play, Activity, FileWarning, ShieldCheck, TrendingUp, ExternalLink, Brain } from "lucide-react";
 import { motion } from "framer-motion";
 
 // ── Identicon ────────────────────────────────────────────────────────────────
@@ -58,31 +59,44 @@ export default function AgentDetail() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const [memories, setMemories] = useState<any[]>([]);
+
   const [userInput, setUserInput] = useState("");
   const [running, setRunning] = useState(false);
   const [runResult, setRunResult] = useState<any>(null);
   const [runError, setRunError] = useState<string | null>(null);
+  const [streamEvents, setStreamEvents] = useState<{ event: string; data: any }[]>([]);
 
   useEffect(() => {
     if (!id) return;
     const agentId = parseInt(id);
-    Promise.all([fetchAgent(agentId), fetchRuns(agentId), fetchClaims(agentId), fetchScore(agentId), fetchPolicies(agentId)])
-      .then(([a, r, c, s, p]) => { setAgent(a); setRuns(r); setClaims(c); setScore(s); setPolicies(p); })
+    Promise.all([fetchAgent(agentId), fetchRuns(agentId), fetchClaims(agentId), fetchScore(agentId), fetchPolicies(agentId), fetchAgentMemories(agentId)])
+      .then(([a, r, c, s, p, m]) => { setAgent(a); setRuns(r); setClaims(c); setScore(s); setPolicies(p); setMemories(m); })
       .catch((err) => setError(err.response?.data?.detail || err.message || "Failed to load agent"))
       .finally(() => setLoading(false));
   }, [id]);
 
-  const handleRun = async (e: React.FormEvent) => {
+  const handleRun = (e: React.FormEvent) => {
     e.preventDefault();
     if (!id) return;
-    setRunning(true); setRunResult(null); setRunError(null);
-    try {
-      const res = await executeRun(parseInt(id), userInput);
-      setRunResult(res);
-      const [updatedRuns, updatedAgent] = await Promise.all([fetchRuns(parseInt(id)), fetchAgent(parseInt(id))]);
-      setRuns(updatedRuns); setAgent(updatedAgent);
-    } catch (err: any) { setRunError(err.response?.data?.detail || err.message || "Run failed"); }
-    setRunning(false);
+    setRunning(true); setRunResult(null); setRunError(null); setStreamEvents([]);
+    const agentId = parseInt(id);
+
+    streamRun(
+      agentId,
+      userInput,
+      (event, data) => {
+        setStreamEvents((prev) => [...prev, { event, data }]);
+        if (event === "complete") {
+          setRunResult(data);
+          Promise.all([fetchRuns(agentId), fetchAgent(agentId), fetchAgentMemories(agentId)])
+            .then(([r, a, m]) => { setRuns(r); setAgent(a); setMemories(m); });
+        }
+        if (event === "error") setRunError(data.message ?? "Run failed");
+      },
+      () => setRunning(false),
+      (err) => { setRunError(err); setRunning(false); },
+    );
   };
 
   const handleActivatePolicy = async (policyId: number) => {
@@ -198,24 +212,51 @@ export default function AgentDetail() {
         {agent.status !== "active" && (
           <p className="text-xs text-zinc-600 mt-2">Agent must be active to run.</p>
         )}
+        {/* SSE progress */}
+        {streamEvents.length > 0 && (
+          <div className="mt-3 space-y-1">
+            {streamEvents.map((ev, i) => {
+              const labels: Record<string, string> = {
+                memory_loaded: "Memory loaded",
+                inference_start: "Inference started",
+                inference_done: "Inference complete",
+                policy_evaluated: "Policy evaluated",
+                complete: "Run stored",
+                error: "Error",
+              };
+              const colors: Record<string, string> = {
+                memory_loaded: "text-violet-400",
+                inference_start: "text-blue-400",
+                inference_done: "text-blue-300",
+                policy_evaluated: ev.data?.verdict === "pass" ? "text-emerald-400" : "text-red-400",
+                complete: "text-emerald-400",
+                error: "text-red-400",
+              };
+              return (
+                <div key={i} className={`text-xs font-mono flex items-center gap-2 ${colors[ev.event] ?? "text-zinc-500"}`}>
+                  <span className="opacity-50">›</span>
+                  <span>{labels[ev.event] ?? ev.event}</span>
+                  {ev.event === "policy_evaluated" && (
+                    <span className={`badge-${ev.data.verdict === "pass" ? "pass" : "fail"}`}>{ev.data.verdict}</span>
+                  )}
+                  {ev.event === "complete" && (
+                    <Link to={`/runs/${ev.data.run_id}`} className="text-violet-400 flex items-center gap-1">
+                      View run <ExternalLink size={10} />
+                    </Link>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
         {runError && (
           <div className="mt-3 p-3 rounded-lg bg-red-950/30 border border-red-900/50 text-red-400 text-xs">{runError}</div>
         )}
-        {runResult && (
-          <div className="mt-3 flex items-center gap-3">
-            <span className={`badge-${runResult.policy_verdict === "pass" ? "pass" : "fail"} text-sm`}>
-              {runResult.policy_verdict}
-            </span>
-            <Link to={`/runs/${runResult.run_id}`} className="text-xs text-violet-400 flex items-center gap-1">
-              View run details <ExternalLink size={11} />
-            </Link>
-            {runResult.reason_codes?.length > 0 && (
-              <div className="flex gap-1.5">
-                {runResult.reason_codes.map((code: string, i: number) => (
-                  <span key={i} className="badge-fail text-xs">{code}</span>
-                ))}
-              </div>
-            )}
+        {runResult?.reason_codes?.length > 0 && (
+          <div className="mt-2 flex gap-1.5 flex-wrap">
+            {runResult.reason_codes.map((code: string, i: number) => (
+              <span key={i} className="badge-fail text-xs">{code}</span>
+            ))}
           </div>
         )}
       </div>
@@ -279,7 +320,7 @@ export default function AgentDetail() {
         <h2 className="text-base font-semibold text-zinc-100">Claims</h2>
         <Link to="/claims" className="text-xs text-zinc-600 hover:text-violet-400 no-underline transition-colors">Submit claim →</Link>
       </div>
-      <div className="glass-card overflow-hidden">
+      <div className="glass-card overflow-hidden mb-5">
         {claims.length === 0 ? (
           <div className="py-8 text-center text-zinc-600 text-sm">No claims filed.</div>
         ) : (
@@ -300,6 +341,43 @@ export default function AgentDetail() {
               ))}
             </tbody>
           </table>
+        )}
+      </div>
+
+      {/* Memory */}
+      <div className="flex items-center gap-2 mb-3">
+        <Brain size={14} className="text-violet-400" />
+        <h2 className="text-base font-semibold text-zinc-100">Agent Memory</h2>
+        <span className="text-xs text-zinc-600">({memories.length} records)</span>
+      </div>
+      <div className="glass-card overflow-hidden">
+        {memories.length === 0 ? (
+          <div className="py-8 text-center text-zinc-600 text-sm">No memory yet — run the agent to build history.</div>
+        ) : (
+          <div className="divide-y divide-zinc-800/60">
+            {memories.map((m: any) => (
+              <div key={m.id} className="px-4 py-3 flex items-start gap-3">
+                <span className={`mt-0.5 shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded uppercase tracking-wider ${
+                  m.memory_type === "violation" ? "bg-red-950/60 text-red-400" :
+                  m.memory_type === "success"   ? "bg-emerald-950/60 text-emerald-400" :
+                  "bg-violet-950/60 text-violet-400"
+                }`}>{m.memory_type}</span>
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs text-zinc-300 leading-relaxed">{m.content}</p>
+                  {m.metadata?.reason_codes?.length > 0 && (
+                    <div className="flex gap-1.5 mt-1.5 flex-wrap">
+                      {m.metadata.reason_codes.map((code: string, i: number) => (
+                        <span key={i} className="font-mono text-[10px] text-zinc-500 bg-zinc-800/60 px-1.5 py-0.5 rounded">{code}</span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <span className="shrink-0 text-[10px] text-zinc-600 tabular-nums">
+                  {m.created_at ? new Date(m.created_at).toLocaleString() : "—"}
+                </span>
+              </div>
+            ))}
+          </div>
         )}
       </div>
     </div>

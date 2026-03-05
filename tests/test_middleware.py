@@ -69,3 +69,91 @@ class TestRateLimiting:
         assert 429 in responses
         # First requests should pass
         assert responses[0] == 200
+
+
+class TestPerOperatorRateLimit:
+    """Tests for the per-API-key (operator) rate limit."""
+
+    def _make_middleware(self, operator_rpm: int = 5):
+        """Return a fresh RateLimitMiddleware with a low operator limit."""
+        from backend.middleware import RateLimitMiddleware
+        # Instantiate without an ASGI app — we call _check() directly
+        mw = RateLimitMiddleware.__new__(RateLimitMiddleware)
+        from collections import defaultdict
+        mw.rpm = 120
+        mw.operator_rpm = operator_rpm
+        mw.requests = defaultdict(list)
+        return mw
+
+    def test_operator_allowed_under_limit(self):
+        import time
+        mw = self._make_middleware(operator_rpm=10)
+        now = time.time()
+        for _ in range(10):
+            allowed = mw._check("key:test-key-1", mw.operator_rpm, now)
+            assert allowed
+
+    def test_operator_blocked_at_limit(self):
+        import time
+        mw = self._make_middleware(operator_rpm=5)
+        now = time.time()
+        results = [mw._check("key:test-key-2", mw.operator_rpm, now) for _ in range(7)]
+        # First 5 allowed, last 2 blocked
+        assert results[:5] == [True] * 5
+        assert results[5] is False
+        assert results[6] is False
+
+    def test_different_keys_are_independent(self):
+        import time
+        mw = self._make_middleware(operator_rpm=3)
+        now = time.time()
+        # Exhaust key-A
+        for _ in range(3):
+            mw._check("key:key-A", mw.operator_rpm, now)
+        assert mw._check("key:key-A", mw.operator_rpm, now) is False
+        # key-B should still be allowed
+        assert mw._check("key:key-B", mw.operator_rpm, now) is True
+
+    def test_window_slides_after_one_minute(self):
+        import time
+        mw = self._make_middleware(operator_rpm=3)
+        old_time = time.time() - 61  # 61 seconds ago (outside window)
+        # Add 3 "old" timestamps
+        mw.requests["key:key-C"] = [old_time, old_time, old_time]
+        now = time.time()
+        # Old requests should be pruned — new request should be allowed
+        assert mw._check("key:key-C", mw.operator_rpm, now) is True
+
+    @pytest.mark.asyncio
+    async def test_api_returns_429_on_operator_limit(self, client):
+        """Integration: HTTP endpoint returns 429 when operator limit is hit."""
+        from backend.middleware import RateLimitMiddleware
+        import time
+
+        # Find and patch the middleware instance to use a low limit
+        for mw_item in app.user_middleware:
+            if mw_item.cls is RateLimitMiddleware:
+                break
+
+        # Directly manipulate the middleware's state to simulate near-limit
+        # by injecting timestamps — access via the built app
+        from starlette.testclient import TestClient as _SC  # noqa: just to locate mw
+        mw_instance = None
+        for layer in app.middleware_stack.__class__.__mro__:
+            pass  # Can't easily get instance; use direct approach below
+
+        # Flood with API key header — operator_rpm=30, so 31+ should 429
+        API_KEY = "fake-operator-key-xyz"
+        responses = []
+        for _ in range(35):
+            r = await client.get("/api/health", headers={"X-API-Key": API_KEY})
+            responses.append(r.status_code)
+
+        assert 429 in responses
+        # First requests pass
+        assert responses[0] == 200
+        # 429 response body
+        rejected = next(i for i, s in enumerate(responses) if s == 429)
+        r = await client.get("/api/health", headers={"X-API-Key": API_KEY})
+        assert r.status_code == 429
+        assert "operator" in r.json()["detail"].lower() or "rate limit" in r.json()["detail"].lower()

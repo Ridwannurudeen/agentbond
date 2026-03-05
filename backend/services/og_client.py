@@ -357,8 +357,15 @@ class OGExecutionClient:
                 tool_call_entries = _extract_tool_calls(chat_output)
                 transcript.extend(tool_call_entries)
 
-            # payment_hash is the x402 on-chain receipt; transaction_hash is always "external"
-            settlement_tx = result.payment_hash or result.transaction_hash
+            # payment_hash is the real x402 on-chain receipt (66-char 0x hash).
+            # transaction_hash from OG SDK returns "external" — not a real tx.
+            # Normalise: only store a value when it looks like a real tx hash.
+            raw_tx = result.payment_hash or result.transaction_hash
+            settlement_tx = (
+                raw_tx
+                if raw_tx and raw_tx != "external" and len(raw_tx) == 66
+                else None
+            )
             model_cid = model_id  # Use the input model_id for consistency
 
             logger.info(f"OG inference complete: run={run_id}, tx={settlement_tx}, "
@@ -427,7 +434,7 @@ class OGExecutionClient:
             input_hash=input_hash,
             output_hash=output_hash,
             transcript=transcript,
-            settlement_tx="external",  # mock: no real on-chain settlement
+            settlement_tx=None,  # mock: no real on-chain settlement
             model_cid=model_id,
             raw_output=output,
         )

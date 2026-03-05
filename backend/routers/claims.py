@@ -4,11 +4,11 @@ import asyncio
 import hashlib
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, date
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from web3 import Web3
 
@@ -22,6 +22,8 @@ from backend.services.reputation import snapshot_score
 from backend.services.webhooks import notify_claim_submitted, notify_claim_resolved
 from backend.validation import validate_reason_code
 from backend.metrics import CLAIMS_TOTAL
+
+DAILY_CLAIM_LIMIT = 5  # max claims per claimant address per UTC day
 
 router = APIRouter(prefix="/api/claims", tags=["claims"])
 logger = logging.getLogger(__name__)
@@ -43,6 +45,21 @@ async def submit_claim(req: SubmitClaimRequest, db: AsyncSession = Depends(get_d
         validate_reason_code(req.reason_code)
     except ValueError as e:
         raise HTTPException(400, str(e))
+
+    # Circuit breaker: per-claimant daily limit
+    today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    daily_count_result = await db.execute(
+        select(func.count(Claim.id)).where(
+            Claim.claimant_address == req.claimant_address,
+            Claim.created_at >= today_start,
+        )
+    )
+    daily_count = daily_count_result.scalar_one()
+    if daily_count >= DAILY_CLAIM_LIMIT:
+        raise HTTPException(
+            429,
+            f"Daily claim limit reached. Maximum {DAILY_CLAIM_LIMIT} claims per address per day.",
+        )
 
     # Validate run exists
     result = await db.execute(select(Run).where(Run.run_id == req.run_id))

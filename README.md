@@ -2,7 +2,9 @@
 
 [![CI](https://github.com/Ridwannurudeen/agentbond/actions/workflows/ci.yml/badge.svg)](https://github.com/Ridwannurudeen/agentbond/actions/workflows/ci.yml)
 
-On-chain warranty layer where operators stake collateral, agent executions are verifiably attested via OpenGradient, policy violations are deterministically detected, and breaches trigger automatic slashing and user reimbursement.
+On-chain warranty layer where operators stake collateral, agent executions are verifiably attested via OpenGradient TEE inference, policy violations are deterministically detected, and breaches trigger automatic slashing and user reimbursement.
+
+**Live:** Backend on VPS (`http://75.119.153.252/api`) · Frontend on Vercel (`https://frontend-omega-jet-65.vercel.app`)
 
 ## Architecture
 
@@ -10,7 +12,9 @@ On-chain warranty layer where operators stake collateral, agent executions are v
 |-------|-----------|---------|
 | Smart Contracts | Solidity + Hardhat | On-chain registry, staking, claim settlement |
 | Backend | FastAPI + SQLAlchemy async | Orchestration, policy engine, claim verification, scoring |
-| Frontend | React + TypeScript + Vite | Operator and user dashboard |
+| AI Inference | OpenGradient SDK (TEE) | Verifiable LLM execution with x402 settlement on Base Sepolia |
+| Agent Memory | PostgreSQL + Alembic | Per-agent run history injected into LLM context |
+| Frontend | React + TypeScript + Vite | Operator and user dashboard with live SSE streaming |
 | CLI | Click | Operator management from the terminal |
 | Chain | Base Sepolia (chain 84532) | Deployed contracts |
 
@@ -62,7 +66,7 @@ cp .env.example .env
 docker compose up -d
 ```
 
-Starts PostgreSQL, backend, and frontend. Backend available at `http://localhost:8000`, frontend at `http://localhost:3000`.
+Starts PostgreSQL, backend, and frontend. Backend at `http://localhost:8000`, frontend at `http://localhost:3000`.
 
 ## Smart Contracts
 
@@ -90,7 +94,7 @@ python scripts/deploy.py
 
 ### Authentication
 
-Write endpoints (`POST /api/policies`, `POST /api/agents/{id}/stake`, `POST /api/agents/{id}/unstake`, `POST /api/agents/{id}/versions`, `POST /api/agents/{id}/status`, `POST /api/agents/{id}/webhook`) require an API key.
+Write endpoints require an API key in the `X-API-Key` header.
 
 Generate one:
 
@@ -98,13 +102,8 @@ Generate one:
 curl -X POST http://localhost:8000/api/operators/0xYOUR_WALLET/api-key
 ```
 
-Pass it as a header:
-
-```bash
-curl -H "X-API-Key: YOUR_KEY" -X POST http://localhost:8000/api/policies \
-  -H "Content-Type: application/json" \
-  -d '{"agent_id": 1, "rules": {"allowed_tools": ["get_price"]}}'
-```
+**First call:** unauthenticated (no key exists yet).
+**Subsequent rotation:** current key must be present in `X-API-Key`.
 
 ### Endpoints
 
@@ -120,24 +119,81 @@ curl -H "X-API-Key: YOUR_KEY" -X POST http://localhost:8000/api/policies \
 | POST | `/api/agents/{id}/webhook` | ✓ | Configure webhook URL |
 | POST | `/api/agents/{id}/stake` | ✓ | Stake collateral |
 | POST | `/api/agents/{id}/unstake` | ✓ | Request unstake (7-day cooldown) |
+| GET | `/api/agents/{id}/memories` | — | List agent memories (supports `?limit=N&memory_type=`) |
+| POST | `/api/agents/{id}/memories` | ✓ | Add operator context memory |
 | POST | `/api/policies` | ✓ | Register policy |
 | GET | `/api/policies/{id}` | — | Get policy |
 | POST | `/api/policies/{id}/activate` | ✓ | Activate policy for agent |
 | POST | `/api/runs` | — | Execute agent run |
+| POST | `/api/runs/stream` | — | Execute run with live SSE progress events |
 | GET | `/api/runs` | — | List runs (filter by agent_id) |
 | GET | `/api/runs/{id}` | — | Get run details |
 | GET | `/api/runs/{id}/replay` | — | Re-verify run proof |
 | POST | `/api/claims` | — | Submit claim |
 | GET | `/api/claims/{id}` | — | Get claim status |
-| GET | `/api/scores/{agentId}` | — | Get agent trust score |
-| GET | `/api/scores` | — | List all trust scores |
-| GET | `/api/dashboard/stats` | — | Global stats (agents, runs, claims, violations) |
+| GET | `/api/scores/{agentId}` | — | Get agent trust score breakdown |
+| GET | `/api/scores/{agentId}/history` | — | Score snapshot history |
+| GET | `/api/scores` | — | Global dashboard stats |
 | POST | `/api/operators/{wallet}/api-key` | — | Generate operator API key |
 | GET | `/api/operators/{id}/webhook-deliveries` | ✓ | Webhook delivery history |
 
 ### Rate Limiting
 
-120 requests per minute per IP. Returns HTTP 429 when exceeded.
+- **Global:** 120 requests/minute per IP
+- **Per-operator:** 30 requests/minute per API key (when `X-API-Key` header is present)
+
+Returns HTTP 429 when exceeded.
+
+### Claim Circuit Breaker
+
+Maximum **5 claims per claimant address per UTC day**. Returns HTTP 429 on breach.
+
+## Agent Memory
+
+Every run automatically stores a memory record (`success` or `violation`) for the agent. Operators can also inject custom `context` memories. The last 10 memories are prepended to the LLM prompt on each subsequent run, giving the agent behavioural continuity.
+
+```bash
+# List memories
+curl http://localhost:8000/api/agents/1/memories
+
+# Filter by type
+curl "http://localhost:8000/api/agents/1/memories?memory_type=violation&limit=5"
+
+# Add operator context
+curl -X POST http://localhost:8000/api/agents/1/memories \
+  -H "X-API-Key: YOUR_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"content": "Prefer low-risk ETH trades.", "metadata": {"source": "operator"}}'
+```
+
+Memory types:
+
+| Type | Created by | Description |
+|------|-----------|-------------|
+| `success` | System | Run passed all policy checks |
+| `violation` | System | Run failed policy — stores reason codes |
+| `context` | Operator | Custom instructions injected into future runs |
+
+## SSE Streaming
+
+Use `/api/runs/stream` to receive live progress events during a run:
+
+```bash
+curl -X POST http://localhost:8000/api/runs/stream \
+  -H "Content-Type: application/json" \
+  -d '{"agent_id": 1, "user_input": "What is the price of ETH?"}'
+```
+
+Events emitted in order:
+
+| Event | Data |
+|-------|------|
+| `memory_loaded` | `has_context`, `agent_id` |
+| `inference_start` | `model`, `agent_id` |
+| `inference_done` | `output`, `settlement_tx` |
+| `policy_evaluated` | `verdict`, `reason_codes` |
+| `complete` | Full run result |
+| `error` | `message` |
 
 ## Policy Rules
 
@@ -197,13 +253,6 @@ curl -X POST http://localhost:8000/api/agents/1/webhook \
 ```
 
 Verify authenticity using the `X-AgentBond-Signature: sha256=<hex>` header (HMAC-SHA256 keyed with your API key).
-
-View delivery history:
-
-```bash
-curl -H "X-API-Key: YOUR_KEY" \
-  "http://localhost:8000/api/operators/1/webhook-deliveries?limit=50"
-```
 
 ## Monitoring
 
@@ -268,13 +317,13 @@ agentbond stats
 ## Testing
 
 ```bash
-# Backend — 130 tests (unit, integration, contract)
+# Backend — 152 tests (unit, integration, contract)
 make test
 
 # Hardhat contract tests — 28 tests
 make contracts-test
 
-# Frontend — 50 tests
+# Frontend — 74 tests
 cd frontend && npm test
 
 # With coverage
@@ -288,9 +337,11 @@ tests/
 ├── test_auth.py            # API key generation and enforcement
 ├── test_claim_verifier.py  # Claim reason code logic
 ├── test_e2e.py             # Full lifecycle via TestClient
-├── test_middleware.py      # Rate limiting
+├── test_memory.py          # Memory service + API endpoints (22 tests)
+├── test_middleware.py      # Rate limiting (IP + per-operator)
 ├── test_orchestrator.py    # OG execution client (mock mode)
 ├── test_policy_engine.py   # All 6 policy rule types
+├── test_validation.py      # Input validation
 ├── test_webhooks.py        # Webhook delivery and helpers
 └── test_contracts/         # In-process EVM tests (eth-tester + py-evm)
     ├── test_agent_registry.py    # 16 tests
@@ -300,7 +351,9 @@ tests/
 
 frontend/src/__tests__/
 ├── api.test.ts             # 18 tests — all API helper functions
+├── AgentDetail.test.tsx    # 14 tests — SSE streaming UI, memory panel
 ├── Dashboard.test.tsx      # 13 tests — stat cards, agent table, recent runs
+├── memory.test.ts          # 10 tests — fetchAgentMemories, streamRun
 ├── Runs.test.tsx           # 12 tests — filtering, refresh, agent filter
 └── WalletContext.test.tsx  #  7 tests — MetaMask connect/disconnect flow
 ```
@@ -314,8 +367,9 @@ agentbond/
 │   └── test/                # Hardhat test suite
 ├── backend/
 │   ├── routers/             # agents.py, runs.py, claims.py, policies.py, scores.py, operators.py
-│   ├── services/            # orchestrator.py, policy_engine.py, claim_verifier.py, webhooks.py, reputation.py
-│   ├── models/              # SQLAlchemy schema
+│   ├── services/            # orchestrator.py, og_client.py, policy_engine.py, claim_verifier.py,
+│   │                        # webhooks.py, reputation.py, memory.py
+│   ├── models/              # SQLAlchemy schema (Agent, Run, Claim, AgentMemory, ...)
 │   ├── contracts/           # Web3 contract interface
 │   ├── auth.py              # require_operator_key dependency
 │   ├── middleware.py        # RateLimitMiddleware, MetricsMiddleware

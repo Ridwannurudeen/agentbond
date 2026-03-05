@@ -120,4 +120,53 @@ export async function unstakeCollateral(agentId: number, amountWei: string) {
   return data;
 }
 
+export async function fetchAgentMemories(agentId: number, limit = 20) {
+  const { data } = await api.get(`/agents/${agentId}/memories`, { params: { limit } });
+  return data;
+}
+
+export function streamRun(
+  agentId: number,
+  userInput: string,
+  onEvent: (event: string, data: any) => void,
+  onDone: () => void,
+  onError: (err: string) => void,
+): () => void {
+  const baseUrl = import.meta.env.VITE_API_BASE_URL || "/api";
+  const url = `${baseUrl}/runs/stream`;
+
+  fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ agent_id: agentId, user_input: userInput }),
+  })
+    .then(async (res) => {
+      if (!res.ok || !res.body) {
+        onError(`HTTP ${res.status}`);
+        return;
+      }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) { onDone(); break; }
+        buffer += decoder.decode(value, { stream: true });
+        const parts = buffer.split("\n\n");
+        buffer = parts.pop() ?? "";
+        for (const part of parts) {
+          const line = part.replace(/^data:\s*/, "").trim();
+          if (!line) continue;
+          try {
+            const parsed = JSON.parse(line);
+            onEvent(parsed.event, parsed.data);
+          } catch { /* ignore malformed */ }
+        }
+      }
+    })
+    .catch((err) => onError(err.message ?? "Stream failed"));
+
+  return () => {}; // abort not needed for short runs
+}
+
 export default api;

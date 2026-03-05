@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     resolver_address: str = ""
     deployer_private_key: str = ""
 
+    # CORS — comma-separated list of allowed origins
+    allowed_origins: str = "http://localhost:5173,http://localhost:3000"
+
     class Config:
         env_file = ".env"
         extra = "ignore"

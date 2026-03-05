@@ -148,6 +148,18 @@ class ReputationSnapshot(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class AgentMemory(Base):
+    __tablename__ = "agent_memories"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    agent_id = Column(Integer, ForeignKey("agents.id"), nullable=False)
+    run_id = Column(String(66), nullable=True)  # linked run, if any
+    memory_type = Column(String(32), nullable=False)  # "violation", "success", "context"
+    content = Column(Text, nullable=False)  # human-readable memory string
+    metadata_json = Column(JSON, nullable=True)  # structured extras (reason_codes, score, etc.)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 class WebhookDelivery(Base):
     __tablename__ = "webhook_deliveries"
 

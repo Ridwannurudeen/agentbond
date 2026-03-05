@@ -1,13 +1,16 @@
 """Run execution and replay endpoints."""
 
+import json
+
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.db import get_db
 from backend.models.schema import Run
-from backend.services.orchestrator import execute_run, replay_run
+from backend.services.orchestrator import execute_run, execute_run_streaming, replay_run
 
 router = APIRouter(prefix="/api/runs", tags=["runs"])
 
@@ -33,6 +36,41 @@ async def create_run(req: ExecuteRunRequest, db: AsyncSession = Depends(get_db))
         return result
     except ValueError as e:
         raise HTTPException(400, str(e))
+
+
+@router.post("/stream")
+async def stream_run(req: ExecuteRunRequest, db: AsyncSession = Depends(get_db)):
+    """Execute an agent run and stream progress via Server-Sent Events.
+
+    Each event is formatted as:
+        data: {"event": "<type>", "data": {...}}\\n\\n
+
+    Event types:
+        memory_loaded     — memory context retrieved
+        inference_start   — OG SDK call starting
+        inference_done    — LLM output received
+        policy_evaluated  — policy verdict determined
+        complete          — run stored, full result returned
+        error             — agent/policy lookup failed
+    """
+    async def _sse_generator():
+        try:
+            async for event in execute_run_streaming(
+                db=db,
+                agent_id=req.agent_id,
+                user_input=req.user_input,
+                user_address=req.user_address,
+                simulate_tools=req.simulate_tools,
+            ):
+                yield f"data: {json.dumps(event)}\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'event': 'error', 'data': {'message': str(e)}})}\n\n"
+
+    return StreamingResponse(
+        _sse_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.get("/{run_id}")

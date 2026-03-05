@@ -12,7 +12,8 @@ from web3 import Web3
 from backend.auth import require_operator_key
 from backend.contracts.interface import contracts
 from backend.db import get_db
-from backend.models.schema import Agent, Operator, AgentVersion, AgentStatus, StakeEvent, Policy
+from backend.models.schema import Agent, Operator, AgentVersion, AgentStatus, StakeEvent, Policy, AgentMemory
+from backend.services.memory import get_recent_memories, store_context_memory
 
 router = APIRouter(prefix="/api/agents", tags=["agents"])
 logger = logging.getLogger(__name__)
@@ -313,3 +314,56 @@ async def request_unstake(
     await db.commit()
 
     return {"agent_id": agent_id, "amount_wei": req.amount_wei, "event": "unstake_requested", "tx_hash": tx_hash}
+
+
+# ---------------------------------------------------------------------------
+# Agent memory endpoints
+# ---------------------------------------------------------------------------
+
+class AddMemoryRequest(BaseModel):
+    content: str
+    metadata: dict | None = None
+
+
+@router.get("/{agent_id}/memories")
+async def list_agent_memories(
+    agent_id: int,
+    memory_type: str | None = None,
+    limit: int = 20,
+    db: AsyncSession = Depends(get_db),
+):
+    """List recent memories for an agent (run outcomes, violations, context)."""
+    agent = await db.get(Agent, agent_id)
+    if not agent:
+        raise HTTPException(404, "Agent not found")
+
+    memories = await get_recent_memories(db, agent_id, limit=min(limit, 100), memory_type=memory_type)
+    return [
+        {
+            "id": m.id,
+            "run_id": m.run_id,
+            "memory_type": m.memory_type,
+            "content": m.content,
+            "metadata": m.metadata_json,
+            "created_at": m.created_at.isoformat() if m.created_at else None,
+        }
+        for m in memories
+    ]
+
+
+@router.post("/{agent_id}/memories")
+async def add_agent_memory(
+    agent_id: int,
+    req: AddMemoryRequest,
+    db: AsyncSession = Depends(get_db),
+    operator: Operator = Depends(require_operator_key),
+):
+    """Add a context memory for an agent (operator-only)."""
+    agent = await db.get(Agent, agent_id)
+    if not agent:
+        raise HTTPException(404, "Agent not found")
+    if agent.operator_id != operator.id:
+        raise HTTPException(403, "Agent does not belong to your operator account")
+
+    await store_context_memory(db, agent_id, req.content, req.metadata)
+    return {"agent_id": agent_id, "status": "memory stored"}

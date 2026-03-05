@@ -4,13 +4,14 @@ import logging
 import logging.config
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Depends
+from fastapi import FastAPI, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.config import settings
 from backend.db import init_db, get_db
 from backend.routers import agents, runs, claims, policies, scores, operators
 from backend.middleware import RateLimitMiddleware, MetricsMiddleware
@@ -72,9 +73,10 @@ app = FastAPI(
 # Metrics middleware first so it wraps everything (including rate-limit 429s)
 app.add_middleware(MetricsMiddleware)
 app.add_middleware(RateLimitMiddleware, requests_per_minute=120)
+_allowed_origins = [o.strip() for o in settings.allowed_origins.split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -129,16 +131,30 @@ async def metrics():
 
 @app.post("/api/operators/{wallet_address}/api-key")
 async def generate_operator_api_key(
-    wallet_address: str, db: AsyncSession = Depends(get_db)
+    wallet_address: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
 ):
-    """Generate a new API key for an operator."""
+    """Generate or rotate the API key for an operator.
+
+    - First call (no key set): unauthenticated, returns initial key.
+    - Subsequent calls: requires the current key in X-API-Key header to rotate.
+
+    Returns the new key — store it immediately, the old key is invalidated.
+    """
+    from fastapi import HTTPException
     result = await db.execute(
         select(Operator).where(Operator.wallet_address == wallet_address)
     )
     operator = result.scalar_one_or_none()
     if not operator:
-        from fastapi import HTTPException
         raise HTTPException(404, "Operator not found")
+
+    # If operator already has a key, require auth to rotate
+    if operator.api_key:
+        provided = request.headers.get("x-api-key") or request.headers.get("X-API-Key")
+        if not provided or provided != operator.api_key:
+            raise HTTPException(401, "Current API key required to rotate. Provide it in X-API-Key header.")
 
     key = generate_api_key()
     operator.api_key = key

@@ -174,13 +174,25 @@ async def _background_notify(agent_id: int, event_type: str, payload: dict) -> N
     """Creates its own DB session so it can run outside the request lifecycle."""
     from backend.db import async_session  # local import avoids circular at module load
 
-    async with async_session() as db:
-        await notify_operator(db, agent_id, event_type, payload)
+    try:
+        async with async_session() as db:
+            await notify_operator(db, agent_id, event_type, payload)
+    except Exception as exc:
+        logger.error(
+            "Webhook background task crashed: event=%s agent=%d error=%s",
+            event_type, agent_id, exc,
+        )
+
+
+# Keep strong references to background tasks so they are not GC'd before completion
+_active_webhook_tasks: set[asyncio.Task] = set()
 
 
 def fire_and_forget(agent_id: int, event_type: str, payload: dict) -> None:
     """Schedule webhook delivery as an asyncio background task (non-blocking)."""
-    asyncio.create_task(_background_notify(agent_id, event_type, payload))
+    task = asyncio.create_task(_background_notify(agent_id, event_type, payload))
+    _active_webhook_tasks.add(task)
+    task.add_done_callback(_active_webhook_tasks.discard)
 
 
 # ---------------------------------------------------------------------------

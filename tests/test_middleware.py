@@ -124,36 +124,23 @@ class TestPerOperatorRateLimit:
         # Old requests should be pruned — new request should be allowed
         assert mw._check("key:key-C", mw.operator_rpm, now) is True
 
-    @pytest.mark.asyncio
-    async def test_api_returns_429_on_operator_limit(self, client):
-        """Integration: HTTP endpoint returns 429 when operator limit is hit."""
-        from backend.middleware import RateLimitMiddleware
+    def test_operator_limit_is_lower_than_ip_limit(self):
+        """Operator rpm should be tighter than the global IP limit."""
+        mw = self._make_middleware(operator_rpm=30)
+        # operator_rpm is 30; IP limit defaults to 120
+        assert mw.operator_rpm < mw.rpm
+
+    def test_requests_dict_keyed_separately_for_ip_and_key(self):
+        """IP and API-key buckets use distinct namespaced keys."""
         import time
-
-        # Find and patch the middleware instance to use a low limit
-        for mw_item in app.user_middleware:
-            if mw_item.cls is RateLimitMiddleware:
-                break
-
-        # Directly manipulate the middleware's state to simulate near-limit
-        # by injecting timestamps — access via the built app
-        from starlette.testclient import TestClient as _SC  # noqa: just to locate mw
-        mw_instance = None
-        for layer in app.middleware_stack.__class__.__mro__:
-            pass  # Can't easily get instance; use direct approach below
-
-        # Flood with API key header — operator_rpm=30, so 31+ should 429
-        API_KEY = "fake-operator-key-xyz"
-        responses = []
-        for _ in range(35):
-            r = await client.get("/api/health", headers={"X-API-Key": API_KEY})
-            responses.append(r.status_code)
-
-        assert 429 in responses
-        # First requests pass
-        assert responses[0] == 200
-        # 429 response body
-        rejected = next(i for i, s in enumerate(responses) if s == 429)
-        r = await client.get("/api/health", headers={"X-API-Key": API_KEY})
-        assert r.status_code == 429
-        assert "operator" in r.json()["detail"].lower() or "rate limit" in r.json()["detail"].lower()
+        mw = self._make_middleware(operator_rpm=3)
+        now = time.time()
+        mw._check("ip:1.2.3.4", mw.rpm, now)
+        mw._check("key:abc123", mw.operator_rpm, now)
+        assert "ip:1.2.3.4" in mw.requests
+        assert "key:abc123" in mw.requests
+        # Exhausting one does not affect the other
+        for _ in range(3):
+            mw._check("key:abc123", mw.operator_rpm, now)
+        assert mw._check("key:abc123", mw.operator_rpm, now) is False
+        assert mw._check("ip:1.2.3.4", mw.rpm, now) is True

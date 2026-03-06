@@ -4,7 +4,7 @@ import logging
 import logging.config
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Depends, Request
+from fastapi import FastAPI, Depends, Request, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
@@ -15,7 +15,7 @@ from backend.config import settings
 from backend.db import init_db, get_db
 from backend.routers import agents, runs, claims, policies, scores, operators
 from backend.middleware import RateLimitMiddleware, MetricsMiddleware
-from backend.auth import generate_api_key
+from backend.auth import generate_api_key, verify_wallet_signature
 from backend.models.schema import Operator
 
 # ---------------------------------------------------------------------------
@@ -134,11 +134,15 @@ async def generate_operator_api_key(
     wallet_address: str,
     request: Request,
     db: AsyncSession = Depends(get_db),
+    signature: str | None = Body(default=None),
+    message: str | None = Body(default=None),
 ):
     """Generate or rotate the API key for an operator.
 
     - First call (no key set): unauthenticated, returns initial key.
-    - Subsequent calls: requires the current key in X-API-Key header to rotate.
+    - Subsequent calls: authenticate via either:
+      (a) current key in X-API-Key header, or
+      (b) wallet signature proving ownership (signature + message in body).
 
     Returns the new key — store it immediately, the old key is invalidated.
     """
@@ -150,11 +154,15 @@ async def generate_operator_api_key(
     if not operator:
         raise HTTPException(404, "Operator not found")
 
-    # If operator already has a key, require auth to rotate
+    # If operator already has a key, require proof of ownership to rotate
     if operator.api_key:
         provided = request.headers.get("x-api-key") or request.headers.get("X-API-Key")
-        if not provided or provided != operator.api_key:
-            raise HTTPException(401, "Current API key required to rotate. Provide it in X-API-Key header.")
+        if provided and provided == operator.api_key:
+            pass  # authenticated via current key
+        elif signature and message and verify_wallet_signature(message, signature, wallet_address):
+            pass  # authenticated via wallet signature
+        else:
+            raise HTTPException(401, "Provide current X-API-Key header or a valid wallet signature to re-issue key.")
 
     key = generate_api_key()
     operator.api_key = key

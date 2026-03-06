@@ -70,8 +70,23 @@ export default function Operator() {
   const [agentResult, setAgentResult] = useState<any>(null);
   const [agentLoading, setAgentLoading] = useState(false);
 
-  // Stored API key after registration
-  const [apiKey, setApiKey] = useState<string | null>(null);
+  // API key — persisted in localStorage per wallet so page refreshes don't lose it
+  const lsKey = address ? `agentbond:apikey:${address.toLowerCase()}` : null;
+  const [apiKey, setApiKeyState] = useState<string | null>(() => {
+    try { return address ? localStorage.getItem(`agentbond:apikey:${address.toLowerCase()}`) : null; } catch { return null; }
+  });
+  const setApiKey = (key: string | null) => {
+    setApiKeyState(key);
+    try { if (lsKey) { key ? localStorage.setItem(lsKey, key) : localStorage.removeItem(lsKey); } } catch { /* ignore */ }
+  };
+
+  // Reload key from localStorage whenever connected wallet changes
+  useEffect(() => {
+    try {
+      const stored = address ? localStorage.getItem(`agentbond:apikey:${address.toLowerCase()}`) : null;
+      setApiKeyState(stored);
+    } catch { /* ignore */ }
+  }, [address]);
 
   const [policyAgentId, setPolicyAgentId] = useState("");
   const [policyRules, setPolicyRules] = useState(
@@ -97,6 +112,7 @@ export default function Operator() {
     }
     setAgentLoading(true);
     setAgentResult(null);
+    let step = "sign message";
     try {
       // Step 1: Sign ownership message
       const ts = Date.now();
@@ -104,11 +120,15 @@ export default function Operator() {
       const signature = await signer.signMessage(message);
 
       // Step 2: Call AgentRegistry.registerAgent on-chain
+      step = "build contract";
       const agentRegistry = getAgentRegistry(signer);
+      step = "registerAgent tx";
       const tx = await agentRegistry.registerAgent(metadataUri);
+      step = "wait for receipt";
       const receipt = await tx.wait();
 
       // Step 3: Extract chain_agent_id from AgentRegistered event
+      step = "parse logs";
       let chainAgentId: string | undefined;
       for (const log of receipt.logs) {
         try {
@@ -121,6 +141,7 @@ export default function Operator() {
       }
 
       // Step 4: POST to backend
+      step = "backend register";
       const result = await registerAgent(address, metadataUri, {
         signature,
         message,
@@ -137,10 +158,22 @@ export default function Operator() {
         setAgentResult({ ...result, chain_tx: receipt.hash });
       }
     } catch (err: any) {
-      setAgentResult({ error: err.response?.data?.detail || err.message });
+      setAgentResult({ error: `[${step}] ${err.response?.data?.detail || err.message || String(err)}` });
     } finally {
       setAgentLoading(false);
     }
+  };
+
+  // Returns cached API key or re-issues one via wallet signature
+  const ensureApiKey = async (): Promise<string> => {
+    if (apiKey) return apiKey;
+    if (!address || !signer) throw new Error("Wallet not connected");
+    const ts = Date.now();
+    const msg = `AgentBond API key request\nWallet: ${address}\nTimestamp: ${ts}`;
+    const sig = await signer.signMessage(msg);
+    const keyData = await generateApiKey(address, sig, msg);
+    setApiKey(keyData.api_key);
+    return keyData.api_key;
   };
 
   const handlePolicy = async (e: React.FormEvent) => {
@@ -185,15 +218,16 @@ export default function Operator() {
       }
 
       // POST to backend
+      const key = await ensureApiKey();
       const result = await registerPolicy(
         agentDbId,
         rules,
         { chain_policy_id: chainPolicyId, chain_tx: receipt.hash },
-        apiKey || undefined
+        key
       );
       setPolicyResult({ ...result, chain_tx: receipt.hash });
     } catch (err: any) {
-      setPolicyResult({ error: err.response?.data?.detail || err.message });
+      setPolicyResult({ error: err.response?.data?.detail || err.message || String(err) });
     } finally {
       setPolicyLoading(false);
     }
@@ -224,10 +258,11 @@ export default function Operator() {
       const receipt = await tx.wait();
 
       // POST to backend to record the event
-      const result = await stakeCollateral(agentDbId, stakeAmount, receipt.hash, apiKey || undefined);
+      const key = await ensureApiKey();
+      const result = await stakeCollateral(agentDbId, stakeAmount, receipt.hash, key);
       setStakeResult({ ...result, chain_tx: receipt.hash });
     } catch (err: any) {
-      setStakeResult({ error: err.response?.data?.detail || err.message });
+      setStakeResult({ error: err.response?.data?.detail || err.message || String(err) });
     } finally {
       setStakeLoading(false);
     }
@@ -236,7 +271,7 @@ export default function Operator() {
   const handleRun = async (e: React.FormEvent) => {
     e.preventDefault();
     try { setRunResult(await executeRun(parseInt(runAgentId), userInput)); }
-    catch (err: any) { setRunResult({ error: err.response?.data?.detail || err.message }); }
+    catch (err: any) { setRunResult({ error: err.response?.data?.detail || err.message || String(err) }); }
   };
 
   return (

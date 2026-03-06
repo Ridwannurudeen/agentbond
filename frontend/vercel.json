@@ -2,6 +2,11 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "framework": "vite",
+  "env": {
+    "VITE_AGENT_REGISTRY_ADDRESS": "0xecec490F548516F26D3C3ED81b90B18A72e0e166",
+    "VITE_WARRANTY_POOL_ADDRESS": "0xC60A6bB93ce52959Cf1eF9d71820eB198ec49820",
+    "VITE_POLICY_REGISTRY_ADDRESS": "0xFfDc7321505634dD42AF522F6BBe160D6296483F"
+  },
   "rewrites": [
     {
       "source": "/api/:path*",

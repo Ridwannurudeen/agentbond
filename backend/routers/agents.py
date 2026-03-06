@@ -51,10 +51,11 @@ class SetStatusRequest(BaseModel):
 @router.post("")
 async def register_agent(req: RegisterAgentRequest, db: AsyncSession = Depends(get_db)):
     """Register a new agent."""
-    # If signature is provided, verify wallet ownership before storing anything
-    if req.signature and req.message:
-        if not verify_wallet_signature(req.message, req.signature, req.wallet_address):
-            raise HTTPException(401, "Signature verification failed: wallet ownership not proven")
+    # Signature is required — wallet ownership must be proven before registration
+    if not req.signature or not req.message:
+        raise HTTPException(401, "Wallet signature required. Connect your wallet and sign the message.")
+    if not verify_wallet_signature(req.message, req.signature, req.wallet_address):
+        raise HTTPException(401, "Signature verification failed: wallet ownership not proven")
 
     # Find or create operator
     result = await db.execute(

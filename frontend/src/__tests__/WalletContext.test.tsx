@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor, act } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { WalletProvider, useWallet } from "../context/WalletContext";
 
@@ -91,9 +91,7 @@ describe("WalletContext — connect without MetaMask", () => {
     const alertSpy = vi.spyOn(window, "alert").mockImplementation(() => {});
     renderWallet();
 
-    await act(async () => {
-      await userEvent.click(screen.getByRole("button", { name: "Connect" }));
-    });
+    await userEvent.click(screen.getByRole("button", { name: "Connect" }));
 
     expect(alertSpy).toHaveBeenCalledWith(
       "MetaMask not detected. Please install MetaMask."
@@ -134,9 +132,7 @@ describe("WalletContext — connect with MetaMask", () => {
     mockGetNetwork.mockResolvedValue({ chainId: BigInt(84532) });
     renderWallet();
 
-    await act(async () => {
-      await userEvent.click(screen.getByRole("button", { name: "Connect" }));
-    });
+    await userEvent.click(screen.getByRole("button", { name: "Connect" }));
 
     await waitFor(() =>
       expect(screen.getByTestId("chainId").textContent).toBe("84532")
@@ -169,9 +165,7 @@ describe("WalletContext — disconnect", () => {
       expect(screen.getByTestId("address").textContent).toBe(ADDR)
     );
 
-    await act(async () => {
-      await userEvent.click(screen.getByRole("button", { name: "Disconnect" }));
-    });
+    await userEvent.click(screen.getByRole("button", { name: "Disconnect" }));
 
     expect(screen.getByTestId("address").textContent).toBe("none");
     expect(screen.getByTestId("chainId").textContent).toBe("none");

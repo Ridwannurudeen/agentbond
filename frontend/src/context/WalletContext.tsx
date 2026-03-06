@@ -70,13 +70,15 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     const provider = new BrowserProvider(window.ethereum);
     provider.send("eth_accounts", []).then(async (accounts: string[]) => {
       if (accounts.length > 0) {
-        setAddress(accounts[0]);
-        const network = await provider.getNetwork();
-        setChainId(Number(network.chainId));
         try {
           const s = await provider.getSigner();
+          const network = await provider.getNetwork();
+          setAddress(accounts[0]);
+          setChainId(Number(network.chainId));
           setSigner(s);
-        } catch { /* signer not available */ }
+        } catch {
+          // getSigner failed — leave as disconnected, user must click Connect Wallet
+        }
       }
     });
 
@@ -84,14 +86,20 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     const onAccountsChanged = (...args: unknown[]) => {
       const accounts = args[0] as string[];
       if (accounts.length > 0) {
-        setAddress(accounts[0]);
+        const p = new BrowserProvider(window.ethereum!);
+        p.getSigner()
+          .then((s) => { setAddress(accounts[0]); setSigner(s); })
+          .catch(() => { setAddress(null); setSigner(null); });
       } else {
         setAddress(null);
         setSigner(null);
       }
     };
-    const onChainChanged = (...args: unknown[]) => {
-      setChainId(parseInt(args[0] as string, 16));
+    const onChainChanged = () => {
+      const p = new BrowserProvider(window.ethereum!);
+      Promise.all([p.getSigner(), p.getNetwork()])
+        .then(([s, n]) => { setSigner(s); setChainId(Number(n.chainId)); })
+        .catch(() => { setSigner(null); });
     };
     const eth = window.ethereum;
     eth.on("accountsChanged", onAccountsChanged);

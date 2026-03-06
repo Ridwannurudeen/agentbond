@@ -20,7 +20,7 @@ services:
       context: .
       dockerfile: Dockerfile.backend
     ports:
-      - "127.0.0.1:8001:8000"
+      - "127.0.0.1:8002:8000"
     environment:
       DATABASE_URL: postgresql+asyncpg://agentbond:agentbond@postgres:5432/agentbond
       DATABASE_URL_SYNC: postgresql://agentbond:agentbond@postgres:5432/agentbond

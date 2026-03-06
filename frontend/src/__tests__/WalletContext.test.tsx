@@ -9,10 +9,11 @@ import { WalletProvider, useWallet } from "../context/WalletContext";
 
 const mockSend = vi.fn();
 const mockGetNetwork = vi.fn();
+const mockGetSigner = vi.fn();
 
 vi.mock("ethers", () => ({
   BrowserProvider: function (this: unknown) {
-    return { send: mockSend, getNetwork: mockGetNetwork };
+    return { send: mockSend, getNetwork: mockGetNetwork, getSigner: mockGetSigner };
   },
 }));
 
@@ -55,6 +56,7 @@ beforeEach(() => {
   // Default: BrowserProvider.send returns empty accounts (no prior connection)
   mockSend.mockResolvedValue([]);
   mockGetNetwork.mockResolvedValue({ chainId: BigInt(1) });
+  mockGetSigner.mockResolvedValue({ getAddress: async () => "0x0" });
 
   Object.defineProperty(window, "ethereum", {
     value: undefined,

@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from web3 import Web3
 
-from backend.auth import require_operator_key
+from backend.auth import require_operator_key, verify_wallet_signature
 from backend.contracts.interface import contracts
 from backend.db import get_db
 from backend.models.schema import Agent, Operator, AgentVersion, AgentStatus, StakeEvent, Policy, AgentMemory
@@ -23,6 +23,11 @@ class RegisterAgentRequest(BaseModel):
     wallet_address: str
     metadata_uri: str
     webhook_url: str | None = None
+    # Optional on-chain data from frontend MetaMask flow
+    signature: str | None = None
+    message: str | None = None
+    chain_agent_id: str | None = None
+    chain_tx: str | None = None
 
 
 class PublishVersionRequest(BaseModel):
@@ -32,6 +37,7 @@ class PublishVersionRequest(BaseModel):
 
 class StakeRequest(BaseModel):
     amount_wei: str  # string to handle large numbers
+    tx_hash: str | None = None  # On-chain tx hash from frontend MetaMask flow
 
 
 class UnstakeRequest(BaseModel):
@@ -45,6 +51,11 @@ class SetStatusRequest(BaseModel):
 @router.post("")
 async def register_agent(req: RegisterAgentRequest, db: AsyncSession = Depends(get_db)):
     """Register a new agent."""
+    # If signature is provided, verify wallet ownership before storing anything
+    if req.signature and req.message:
+        if not verify_wallet_signature(req.message, req.signature, req.wallet_address):
+            raise HTTPException(401, "Signature verification failed: wallet ownership not proven")
+
     # Find or create operator
     result = await db.execute(
         select(Operator).where(Operator.wallet_address == req.wallet_address)
@@ -66,10 +77,17 @@ async def register_agent(req: RegisterAgentRequest, db: AsyncSession = Depends(g
     await db.commit()
     await db.refresh(agent)
 
-    # Wire up on-chain: register agent
+    # Wire up on-chain: use frontend-provided chain data if available, else call contracts
     chain_agent_id = None
     chain_tx = None
-    if contracts.is_configured():
+    if req.chain_agent_id is not None:
+        # Frontend already did the on-chain registration via MetaMask
+        chain_agent_id = int(req.chain_agent_id)
+        chain_tx = req.chain_tx
+        agent.chain_agent_id = chain_agent_id
+        await db.commit()
+        logger.info(f"Agent {agent.id} on-chain data from frontend: chainId={chain_agent_id} tx={chain_tx}")
+    elif contracts.is_configured():
         try:
             chain_agent_id, chain_tx = await asyncio.to_thread(
                 contracts.register_agent, req.metadata_uri
@@ -257,7 +275,11 @@ async def stake_collateral(
     amount_wei = int(req.amount_wei)
     tx_hash = None
 
-    if contracts.is_configured() and agent.chain_agent_id is not None:
+    if req.tx_hash is not None:
+        # Frontend already staked via MetaMask — just record the event
+        tx_hash = req.tx_hash
+        logger.info(f"Stake recorded from frontend tx for agent {agent_id}: tx={tx_hash}")
+    elif contracts.is_configured() and agent.chain_agent_id is not None:
         try:
             tx_hash = await asyncio.to_thread(
                 contracts.stake, agent.chain_agent_id, amount_wei

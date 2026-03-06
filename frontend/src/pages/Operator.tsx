@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from "react";
-import { registerAgent, registerPolicy, stakeCollateral, executeRun } from "../api";
+import { registerAgent, generateApiKey, registerPolicy, stakeCollateral, executeRun, fetchAgent } from "../api";
 import { useWallet } from "../context/WalletContext";
+import { getAgentRegistry, getWarrantyPool, getPolicyRegistry } from "../contracts";
+import { sha256, toUtf8Bytes } from "ethers";
 import { Bot, ShieldCheck, Coins, Play, CheckCircle2, XCircle } from "lucide-react";
 import { motion } from "framer-motion";
 
@@ -62,44 +64,173 @@ function Section({
 }
 
 export default function Operator() {
-  const { address } = useWallet();
+  const { address, signer } = useWallet();
 
-  const [wallet, setWallet] = useState("");
   const [metadataUri, setMetadataUri] = useState("");
   const [agentResult, setAgentResult] = useState<any>(null);
+  const [agentLoading, setAgentLoading] = useState(false);
+
+  // Stored API key after registration
+  const [apiKey, setApiKey] = useState<string | null>(null);
 
   const [policyAgentId, setPolicyAgentId] = useState("");
   const [policyRules, setPolicyRules] = useState(
     JSON.stringify({ allowed_tools: ["get_price", "get_portfolio"], max_value_per_action: 1000, prohibited_targets: [], max_actions_per_window: 100, window_seconds: 3600 }, null, 2)
   );
   const [policyResult, setPolicyResult] = useState<any>(null);
+  const [policyLoading, setPolicyLoading] = useState(false);
 
   const [stakeAgentId, setStakeAgentId] = useState("");
   const [stakeAmount, setStakeAmount] = useState("");
   const [stakeResult, setStakeResult] = useState<any>(null);
+  const [stakeLoading, setStakeLoading] = useState(false);
 
   const [runAgentId, setRunAgentId] = useState("");
   const [userInput, setUserInput] = useState("");
   const [runResult, setRunResult] = useState<any>(null);
 
-  useEffect(() => { if (address) setWallet(address); }, [address]);
-
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
-    try { setAgentResult(await registerAgent(wallet, metadataUri)); }
-    catch (err: any) { setAgentResult({ error: err.response?.data?.detail || err.message }); }
+    if (!address || !signer) {
+      setAgentResult({ error: "Connect your wallet first." });
+      return;
+    }
+    setAgentLoading(true);
+    setAgentResult(null);
+    try {
+      // Step 1: Sign ownership message
+      const ts = Date.now();
+      const message = `Register AgentBond operator\nWallet: ${address}\nTimestamp: ${ts}`;
+      const signature = await signer.signMessage(message);
+
+      // Step 2: Call AgentRegistry.registerAgent on-chain
+      const agentRegistry = getAgentRegistry(signer);
+      const tx = await agentRegistry.registerAgent(metadataUri);
+      const receipt = await tx.wait();
+
+      // Step 3: Extract chain_agent_id from AgentRegistered event
+      let chainAgentId: string | undefined;
+      for (const log of receipt.logs) {
+        try {
+          const parsed = agentRegistry.interface.parseLog(log);
+          if (parsed?.name === "AgentRegistered") {
+            chainAgentId = parsed.args.agentId.toString();
+            break;
+          }
+        } catch { /* not this event */ }
+      }
+
+      // Step 4: POST to backend
+      const result = await registerAgent(address, metadataUri, {
+        signature,
+        message,
+        chain_agent_id: chainAgentId,
+        chain_tx: receipt.hash,
+      });
+
+      // Step 5: Fetch API key for subsequent protected calls
+      try {
+        const keyData = await generateApiKey(address);
+        setApiKey(keyData.api_key);
+        setAgentResult({ ...result, api_key: keyData.api_key, chain_tx: receipt.hash });
+      } catch {
+        setAgentResult({ ...result, chain_tx: receipt.hash });
+      }
+    } catch (err: any) {
+      setAgentResult({ error: err.response?.data?.detail || err.message });
+    } finally {
+      setAgentLoading(false);
+    }
   };
 
   const handlePolicy = async (e: React.FormEvent) => {
     e.preventDefault();
-    try { setPolicyResult(await registerPolicy(parseInt(policyAgentId), JSON.parse(policyRules))); }
-    catch (err: any) { setPolicyResult({ error: err.message }); }
+    if (!signer) {
+      setPolicyResult({ error: "Connect your wallet first." });
+      return;
+    }
+    setPolicyLoading(true);
+    setPolicyResult(null);
+    try {
+      const agentDbId = parseInt(policyAgentId);
+      const rules = JSON.parse(policyRules);
+
+      // Fetch agent to get chain_agent_id
+      const agent = await fetchAgent(agentDbId);
+      if (!agent.chain_agent_id) {
+        setPolicyResult({ error: "Agent has no on-chain ID. Register agent on-chain first." });
+        return;
+      }
+
+      // Compute policyHash (bytes32) and rulesURI
+      const rulesStr = JSON.stringify(rules);
+      const policyHashBytes32 = sha256(toUtf8Bytes(rulesStr));
+      const rulesUri = `data:application/json,${rulesStr}`;
+
+      // Call PolicyRegistry.registerPolicy on-chain
+      const policyRegistry = getPolicyRegistry(signer);
+      const tx = await policyRegistry.registerPolicy(agent.chain_agent_id, policyHashBytes32, rulesUri);
+      const receipt = await tx.wait();
+
+      // Extract chain_policy_id from PolicyRegistered event
+      let chainPolicyId: string | undefined;
+      for (const log of receipt.logs) {
+        try {
+          const parsed = policyRegistry.interface.parseLog(log);
+          if (parsed?.name === "PolicyRegistered") {
+            chainPolicyId = parsed.args.policyId.toString();
+            break;
+          }
+        } catch { /* not this event */ }
+      }
+
+      // POST to backend
+      const result = await registerPolicy(
+        agentDbId,
+        rules,
+        { chain_policy_id: chainPolicyId, chain_tx: receipt.hash },
+        apiKey || undefined
+      );
+      setPolicyResult({ ...result, chain_tx: receipt.hash });
+    } catch (err: any) {
+      setPolicyResult({ error: err.response?.data?.detail || err.message });
+    } finally {
+      setPolicyLoading(false);
+    }
   };
 
   const handleStake = async (e: React.FormEvent) => {
     e.preventDefault();
-    try { setStakeResult(await stakeCollateral(parseInt(stakeAgentId), stakeAmount)); }
-    catch (err: any) { setStakeResult({ error: err.response?.data?.detail || err.message }); }
+    if (!signer) {
+      setStakeResult({ error: "Connect your wallet first." });
+      return;
+    }
+    setStakeLoading(true);
+    setStakeResult(null);
+    try {
+      const agentDbId = parseInt(stakeAgentId);
+      const amountWei = BigInt(stakeAmount);
+
+      // Fetch agent to get chain_agent_id
+      const agent = await fetchAgent(agentDbId);
+      if (!agent.chain_agent_id) {
+        setStakeResult({ error: "Agent has no on-chain ID. Register agent on-chain first." });
+        return;
+      }
+
+      // Call WarrantyPool.stake on-chain
+      const warrantyPool = getWarrantyPool(signer);
+      const tx = await warrantyPool.stake(agent.chain_agent_id, { value: amountWei });
+      const receipt = await tx.wait();
+
+      // POST to backend to record the event
+      const result = await stakeCollateral(agentDbId, stakeAmount, receipt.hash, apiKey || undefined);
+      setStakeResult({ ...result, chain_tx: receipt.hash });
+    } catch (err: any) {
+      setStakeResult({ error: err.response?.data?.detail || err.message });
+    } finally {
+      setStakeLoading(false);
+    }
   };
 
   const handleRun = async (e: React.FormEvent) => {
@@ -122,15 +253,17 @@ export default function Operator() {
             <div>
               <label className="form-label flex items-center gap-1.5">
                 Wallet Address
-                {address && <span className="text-violet-500 font-normal normal-case tracking-normal">· auto-filled</span>}
+                {address && <span className="text-violet-500 font-normal normal-case tracking-normal">· auto-filled from MetaMask</span>}
               </label>
-              <input className="form-input font-mono" value={wallet} onChange={(e) => setWallet(e.target.value)} placeholder="0x..." required />
+              <input className="form-input font-mono" value={address || ""} readOnly placeholder="Connect wallet to fill" />
             </div>
             <div>
               <label className="form-label">Metadata URI</label>
               <input className="form-input" value={metadataUri} onChange={(e) => setMetadataUri(e.target.value)} placeholder="ipfs://..." required />
             </div>
-            <button type="submit" className="btn-primary">Register</button>
+            <button type="submit" className="btn-primary" disabled={agentLoading || !signer}>
+              {agentLoading ? "Signing & Registering…" : "Register (MetaMask)"}
+            </button>
           </form>
           <ResultBox result={agentResult} />
         </Section>
@@ -151,7 +284,9 @@ export default function Operator() {
                 rows={7}
               />
             </div>
-            <button type="submit" className="btn-primary">Register Policy</button>
+            <button type="submit" className="btn-primary" disabled={policyLoading || !signer}>
+              {policyLoading ? "Registering…" : "Register Policy (MetaMask)"}
+            </button>
           </form>
           <ResultBox result={policyResult} />
         </Section>
@@ -167,7 +302,9 @@ export default function Operator() {
               <label className="form-label">Amount (wei)</label>
               <input className="form-input font-mono" value={stakeAmount} onChange={(e) => setStakeAmount(e.target.value)} placeholder="10000000000000000" required />
             </div>
-            <button type="submit" className="btn-primary">Stake</button>
+            <button type="submit" className="btn-primary" disabled={stakeLoading || !signer}>
+              {stakeLoading ? "Staking…" : "Stake (MetaMask)"}
+            </button>
           </form>
           <ResultBox result={stakeResult} />
         </Section>

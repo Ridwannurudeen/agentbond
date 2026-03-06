@@ -22,6 +22,9 @@ logger = logging.getLogger(__name__)
 class RegisterPolicyRequest(BaseModel):
     agent_id: int
     rules: dict
+    # Optional on-chain data from frontend MetaMask flow
+    chain_policy_id: str | None = None
+    chain_tx: str | None = None
 
 
 class ActivatePolicyRequest(BaseModel):
@@ -54,10 +57,17 @@ async def register_policy(
     await db.commit()
     await db.refresh(policy)
 
-    # Wire up on-chain: register policy
+    # Wire up on-chain: use frontend-provided chain data if available, else call contracts
     chain_policy_id = None
     chain_tx = None
-    if contracts.is_configured() and agent.chain_agent_id is not None:
+    if req.chain_policy_id is not None:
+        # Frontend already registered policy via MetaMask
+        chain_policy_id = int(req.chain_policy_id)
+        chain_tx = req.chain_tx
+        policy.chain_policy_id = chain_policy_id
+        await db.commit()
+        logger.info(f"Policy {policy.id} on-chain data from frontend: chainId={chain_policy_id} tx={chain_tx}")
+    elif contracts.is_configured() and agent.chain_agent_id is not None:
         try:
             policy_hash_bytes = bytes.fromhex(policy_hash)
             rules_uri = f"data:application/json,{rules_str}"

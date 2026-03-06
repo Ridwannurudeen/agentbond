@@ -1,6 +1,8 @@
 """API key authentication for operator endpoints."""
 
 import secrets
+from eth_account import Account
+from eth_account.messages import encode_defunct
 from fastapi import Header, HTTPException, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,6 +14,19 @@ from backend.models.schema import Operator
 def generate_api_key() -> str:
     """Generate a random 48-character API key."""
     return secrets.token_hex(24)
+
+
+def verify_wallet_signature(message: str, signature: str, expected_address: str) -> bool:
+    """Verify an EIP-191 personal_sign signature.
+
+    Returns True if the signature was made by expected_address, False otherwise.
+    """
+    try:
+        msg = encode_defunct(text=message)
+        recovered = Account.recover_message(msg, signature=signature)
+        return recovered.lower() == expected_address.lower()
+    except Exception:
+        return False
 
 
 async def verify_operator_key(

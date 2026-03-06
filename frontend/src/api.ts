@@ -24,12 +24,22 @@ export async function fetchAgent(id: number) {
   return data;
 }
 
-export async function registerAgent(walletAddress: string, metadataUri: string) {
+export async function registerAgent(
+  walletAddress: string,
+  metadataUri: string,
+  extras?: { signature?: string; message?: string; chain_agent_id?: string; chain_tx?: string }
+) {
   const { data } = await api.post("/agents", {
     wallet_address: walletAddress,
     metadata_uri: metadataUri,
+    ...extras,
   });
   return data;
+}
+
+export async function generateApiKey(walletAddress: string) {
+  const { data } = await api.post(`/operators/${walletAddress}/api-key`);
+  return data as { operator_id: number; wallet_address: string; api_key: string };
 }
 
 export async function fetchRuns(agentId?: number) {
@@ -93,11 +103,16 @@ export async function fetchPolicies(agentId?: number) {
   return data;
 }
 
-export async function registerPolicy(agentId: number, rules: object) {
-  const { data } = await api.post("/policies", {
-    agent_id: agentId,
-    rules,
-  });
+export async function registerPolicy(
+  agentId: number,
+  rules: object,
+  extras?: { chain_policy_id?: string; chain_tx?: string },
+  apiKey?: string
+) {
+  const body = { agent_id: agentId, rules, ...extras };
+  const { data } = apiKey
+    ? await api.post("/policies", body, { headers: { "X-API-Key": apiKey } })
+    : await api.post("/policies", body);
   return data;
 }
 
@@ -106,10 +121,16 @@ export async function activatePolicy(policyId: number) {
   return data;
 }
 
-export async function stakeCollateral(agentId: number, amountWei: string) {
-  const { data } = await api.post(`/agents/${agentId}/stake`, {
-    amount_wei: amountWei,
-  });
+export async function stakeCollateral(
+  agentId: number,
+  amountWei: string,
+  txHash?: string,
+  apiKey?: string
+) {
+  const body = { amount_wei: amountWei, ...(txHash ? { tx_hash: txHash } : {}) };
+  const { data } = apiKey
+    ? await api.post(`/agents/${agentId}/stake`, body, { headers: { "X-API-Key": apiKey } })
+    : await api.post(`/agents/${agentId}/stake`, body);
   return data;
 }
 

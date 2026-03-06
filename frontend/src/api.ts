@@ -37,8 +37,9 @@ export async function registerAgent(
   return data;
 }
 
-export async function generateApiKey(walletAddress: string) {
-  const { data } = await api.post(`/operators/${walletAddress}/api-key`);
+export async function generateApiKey(walletAddress: string, signature?: string, message?: string) {
+  const body = signature && message ? { signature, message } : {};
+  const { data } = await api.post(`/operators/${walletAddress}/api-key`, body);
   return data as { operator_id: number; wallet_address: string; api_key: string };
 }
 

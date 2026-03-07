@@ -194,6 +194,10 @@ export default function Operator() {
         setPolicyResult({ error: "Agent has no on-chain ID. Register agent on-chain first." });
         return;
       }
+      if (agent.operator_wallet && agent.operator_wallet.toLowerCase() !== address?.toLowerCase()) {
+        setPolicyResult({ error: `This agent belongs to wallet ${agent.operator_wallet}. Connect that wallet to register a policy.` });
+        return;
+      }
 
       // Compute policyHash (bytes32) and rulesURI
       const rulesStr = JSON.stringify(rules);
@@ -249,6 +253,10 @@ export default function Operator() {
       const agent = await fetchAgent(agentDbId);
       if (!agent.chain_agent_id) {
         setStakeResult({ error: "Agent has no on-chain ID. Register agent on-chain first." });
+        return;
+      }
+      if (agent.operator_wallet && agent.operator_wallet.toLowerCase() !== address?.toLowerCase()) {
+        setStakeResult({ error: `This agent belongs to wallet ${agent.operator_wallet}. Connect that wallet to stake.` });
         return;
       }
 

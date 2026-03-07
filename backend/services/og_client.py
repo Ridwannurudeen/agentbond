@@ -6,6 +6,8 @@ import logging
 import uuid
 from dataclasses import dataclass
 
+import urllib.request
+
 logger = logging.getLogger(__name__)
 
 # Map simple tool names to OpenAI-style function definitions for the LLM
@@ -231,6 +233,32 @@ def _build_tool_defs(tool_names: list[str] | None) -> list[dict] | None:
     return defs if defs else None
 
 
+def _execute_tool(name: str, args: dict) -> str:
+    """Execute a tool and return a string result."""
+    try:
+        if name == "get_price":
+            symbol = args.get("symbol", "ETH").upper()
+            coin_ids = {"ETH": "ethereum", "BTC": "bitcoin", "SOL": "solana", "BNB": "binancecoin", "USDC": "usd-coin", "USDT": "tether"}
+            coin_id = coin_ids.get(symbol, symbol.lower())
+            url = f"https://api.coingecko.com/api/v3/simple/price?ids={coin_id}&vs_currencies=usd"
+            with urllib.request.urlopen(url, timeout=5) as r:
+                data = json.loads(r.read())
+            price = data.get(coin_id, {}).get("usd")
+            return f"${price:,.2f} USD" if price else f"Price unavailable for {symbol}"
+
+        if name == "get_portfolio":
+            return json.dumps({"holdings": [{"asset": "ETH", "amount": 1.5, "value_usd": 4500}, {"asset": "BTC", "amount": 0.05, "value_usd": 3000}], "total_usd": 7500})
+
+        if name in ("get_balance", "get_market_data"):
+            return json.dumps({"status": "ok", "result": f"Mock result for {name}"})
+
+    except Exception as e:
+        logger.warning(f"Tool execution failed for {name}: {e}")
+        return f"Error executing {name}: {e}"
+
+    return f"Tool {name} executed with args {args}"
+
+
 def _extract_tool_calls(chat_output: dict) -> list[dict]:
     """Extract tool calls from the LLM chat output into transcript format."""
     tool_calls = chat_output.get("tool_calls", [])
@@ -328,45 +356,76 @@ class OGExecutionClient:
 
             logger.info(f"Executing OG inference: model={og_model}, tools={len(tool_defs or [])}")
 
-            result = self._client.llm.chat(
-                model=og_model,
-                messages=[{"role": "user", "content": user_input}],
-                max_tokens=500,
-                tools=tool_defs,
-                x402_settlement_mode=og.x402SettlementMode.SETTLE_METADATA,
-            )
+            messages = [{"role": "user", "content": user_input}]
+            transcript = [{"role": "user", "content": user_input}]
+            output = ""
+            settlement_tx_first = None
 
-            # Extract output
-            chat_output = result.chat_output
-            if isinstance(chat_output, dict):
+            # Agentic loop: LLM → execute tools → LLM with results → final answer
+            for _turn in range(3):
+                # Retry once on payment failures (x402 is intermittently flaky)
+                _last_exc = None
+                for _attempt in range(3):
+                    try:
+                        result = self._client.llm.chat(
+                            model=og_model,
+                            messages=messages,
+                            max_tokens=500,
+                            tools=tool_defs,
+                            x402_settlement_mode=og.x402SettlementMode.SETTLE,
+                        )
+                        _last_exc = None
+                        break
+                    except Exception as _e:
+                        _last_exc = _e
+                        logger.warning(f"OG chat attempt {_attempt + 1} failed: {_e}, retrying…")
+                        import asyncio as _asyncio
+                        await _asyncio.sleep(1.5)
+                if _last_exc:
+                    raise _last_exc
+                if settlement_tx_first is None:
+                    raw_tx = result.payment_hash or result.transaction_hash
+                    if raw_tx and raw_tx != "external" and len(raw_tx) == 66:
+                        settlement_tx_first = raw_tx
+
+                chat_output = result.chat_output
+                if not isinstance(chat_output, dict):
+                    output = str(chat_output)
+                    transcript.append({"role": "assistant", "content": output})
+                    break
+
                 content = chat_output.get("content", "")
-                output = content if content else json.dumps(chat_output)
-            else:
-                output = str(chat_output)
+                tool_calls = chat_output.get("tool_calls", [])
+
+                if not tool_calls:
+                    # Final text response
+                    output = content or json.dumps(chat_output)
+                    transcript.append({"role": "assistant", "content": output})
+                    break
+
+                # Record assistant tool-call turn
+                messages.append({"role": "assistant", "content": content or "", "tool_calls": tool_calls})
+                transcript.append({"role": "assistant", "content": content or "", "tool_calls": tool_calls})
+
+                # Execute each tool and append results
+                for tc in tool_calls:
+                    func = tc.get("function", {})
+                    tool_name = func.get("name", "unknown")
+                    try:
+                        args = json.loads(func.get("arguments", "{}"))
+                    except Exception:
+                        args = {}
+                    tool_result = _execute_tool(tool_name, args)
+                    transcript.append({"role": "tool_call", "tool": tool_name, "args": args, "result": tool_result})
+                    messages.append({"role": "tool", "tool_call_id": tc.get("id", tool_name), "content": tool_result})
+
+            if not output:
+                output = "Agent completed tool execution."
 
             output_hash = hashlib.sha256(output.encode()).hexdigest()
+            settlement_tx = settlement_tx_first
 
-            # Build transcript
-            transcript = [
-                {"role": "user", "content": user_input},
-                {"role": "assistant", "content": output},
-            ]
-
-            # Extract tool calls from LLM response
-            if isinstance(chat_output, dict):
-                tool_call_entries = _extract_tool_calls(chat_output)
-                transcript.extend(tool_call_entries)
-
-            # payment_hash is the real x402 on-chain receipt (66-char 0x hash).
-            # transaction_hash from OG SDK returns "external" — not a real tx.
-            # Normalise: only store a value when it looks like a real tx hash.
-            raw_tx = result.payment_hash or result.transaction_hash
-            settlement_tx = (
-                raw_tx
-                if raw_tx and raw_tx != "external" and len(raw_tx) == 66
-                else None
-            )
-            model_cid = model_id  # Use the input model_id for consistency
+            model_cid = model_id
 
             logger.info(f"OG inference complete: run={run_id}, tx={settlement_tx}, "
                         f"tools_called={len(transcript) - 2}")

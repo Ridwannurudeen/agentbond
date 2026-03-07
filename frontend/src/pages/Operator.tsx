@@ -276,10 +276,29 @@ export default function Operator() {
     }
   };
 
+  const [runLoading, setRunLoading] = useState(false);
+
   const handleRun = async (e: React.FormEvent) => {
     e.preventDefault();
-    try { setRunResult(await executeRun(parseInt(runAgentId), userInput)); }
-    catch (err: any) { setRunResult({ error: err.response?.data?.detail || err.message || String(err) }); }
+    if (!signer) {
+      setRunResult({ error: "Connect your wallet first." });
+      return;
+    }
+    setRunLoading(true);
+    setRunResult(null);
+    try {
+      // Always sign to authorize this specific run
+      const ts = Date.now();
+      const message = `AgentBond run authorization\nAgent: ${runAgentId}\nWallet: ${address}\nTimestamp: ${ts}`;
+      const signature = await signer.signMessage(message);
+
+      const key = await ensureApiKey();
+      setRunResult(await executeRun(parseInt(runAgentId), userInput, address ?? undefined, key, signature, message));
+    } catch (err: any) {
+      setRunResult({ error: err.response?.data?.detail || err.message || String(err) });
+    } finally {
+      setRunLoading(false);
+    }
   };
 
   return (
@@ -369,8 +388,8 @@ export default function Operator() {
                 placeholder="What is the current price of ETH?"
               />
             </div>
-            <button type="submit" className="btn-primary">
-              <Play size={13} /> Execute
+            <button type="submit" className="btn-primary" disabled={runLoading || !signer}>
+              <Play size={13} /> {runLoading ? "Executing…" : "Execute"}
             </button>
           </form>
           <ResultBox result={runResult} />

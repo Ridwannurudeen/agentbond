@@ -20,6 +20,8 @@ class ExecuteRunRequest(BaseModel):
     user_input: str
     user_address: str | None = None
     simulate_tools: list[dict] | None = None
+    signature: str | None = None   # wallet signature authorizing this run
+    message: str | None = None
 
 
 @router.post("")

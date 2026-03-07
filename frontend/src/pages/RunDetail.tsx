@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { fetchRun, replayRun, submitClaim } from "../api";
 import { useWallet } from "../context/WalletContext";
+import { CopyButton } from "../components/CopyButton";
 import { ChevronLeft, RefreshCw, ShieldAlert, CheckCircle2, XCircle } from "lucide-react";
 import { motion } from "framer-motion";
 
@@ -92,7 +93,10 @@ export default function RunDetail() {
               {run.policy_verdict}
             </span>
           </div>
-          <p className="text-xs text-zinc-600 font-mono">{run.run_id}</p>
+          <div className="flex items-center gap-1.5">
+            <p className="text-xs text-zinc-600 font-mono">{run.run_id}</p>
+            <CopyButton value={run.run_id} />
+          </div>
         </div>
       </motion.div>
 
@@ -125,12 +129,16 @@ export default function RunDetail() {
             {[
               { label: "Input Hash", value: run.input_hash },
               { label: "Output Hash", value: run.output_hash },
+              { label: "Evidence Hash", value: run.evidence_hash },
               { label: "Settlement TX", value: run.settlement_tx },
             ].map(({ label, value }) => (
               <div key={label}>
                 <div className="text-xs text-zinc-600 mb-0.5">{label}</div>
-                <div className={`font-mono text-xs break-all ${value ? "text-zinc-400" : "text-zinc-700"}`}>
-                  {value || "—"}
+                <div className="flex items-center gap-1.5">
+                  <span className={`font-mono text-xs break-all ${value ? "text-zinc-400" : "text-zinc-700"}`}>
+                    {value || "—"}
+                  </span>
+                  {value && <CopyButton value={value} />}
                 </div>
               </div>
             ))}

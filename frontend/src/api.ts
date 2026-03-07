@@ -54,11 +54,21 @@ export async function fetchRun(runId: string) {
   return data;
 }
 
-export async function executeRun(agentId: number, userInput: string) {
+export async function executeRun(
+  agentId: number,
+  userInput: string,
+  userAddress?: string,
+  apiKey?: string,
+  signature?: string,
+  message?: string,
+) {
+  const headers = apiKey ? { "X-API-Key": apiKey } : undefined;
   const { data } = await api.post("/runs", {
     agent_id: agentId,
     user_input: userInput,
-  });
+    ...(userAddress ? { user_address: userAddress } : {}),
+    ...(signature ? { signature, message } : {}),
+  }, { headers });
   return data;
 }
 

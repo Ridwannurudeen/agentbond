@@ -4,7 +4,10 @@
 
 On-chain warranty layer where operators stake collateral, agent executions are verifiably attested via OpenGradient TEE inference, policy violations are deterministically detected, and breaches trigger automatic slashing and user reimbursement.
 
-**Live:** Backend on VPS (`http://75.119.153.252/api`) · Frontend on Vercel (`https://frontend-omega-jet-65.vercel.app`)
+**Live:**
+- Frontend: [agentbond.vercel.app](https://agentbond.vercel.app)
+- Backend API: `http://75.119.153.252/api`
+- API Docs: `http://75.119.153.252/api/docs`
 
 ## Architecture
 
@@ -72,12 +75,12 @@ Starts PostgreSQL, backend, and frontend. Backend at `http://localhost:8000`, fr
 
 4 contracts deployed on **Base Sepolia** (chain ID 84532):
 
-| Contract | Purpose |
-|----------|---------|
-| `AgentRegistry` | Agent registration, versioning, reputation scores, operator/resolver access control |
-| `PolicyRegistry` | Policy definitions, activation, deprecation |
-| `WarrantyPool` | Staking (7-day cooldown unstake), slashing, payouts, collateral reservation |
-| `ClaimManager` | Claim lifecycle (submit → verify → approve/reject → payout), daily rate limiting |
+| Contract | Address | Purpose |
+|----------|---------|---------|
+| `AgentRegistry` | `0xecec490F548516F26D3C3ED81b90B18A72e0e166` | Agent registration, versioning, reputation |
+| `PolicyRegistry` | `0xFfDc7321505634dD42AF522F6BBe160D6296483F` | Policy definitions and activation |
+| `WarrantyPool` | `0xC60A6bB93ce52959Cf1eF9d71820eB198ec49820` | Staking (7-day cooldown), slashing, payouts |
+| `ClaimManager` | — | Claim lifecycle and auto-settlement |
 
 ```bash
 # Compile
@@ -90,20 +93,59 @@ cd contracts && npx hardhat test
 python scripts/deploy.py
 ```
 
+## Operator Flow (MetaMask)
+
+The Operator Console at [agentbond.vercel.app](https://agentbond.vercel.app) walks through the full on-chain flow:
+
+1. **Register Agent** — signs ownership message → calls `AgentRegistry.registerAgent()` via MetaMask → POSTs to backend with `chain_agent_id` + tx hash
+2. **Register Policy** — validates you own the agent → calls `PolicyRegistry.registerPolicy()` on-chain → syncs to backend
+3. **Stake Collateral** — calls `WarrantyPool.stake()` with ETH value → records stake event in backend
+4. **Execute Run** — signs a per-run authorization message via MetaMask → backend runs verifiable LLM inference via OpenGradient TEE → returns `output` + `policy_verdict` + `evidence_hash`
+
+## Agentic Tool Execution
+
+Run execution uses a full agentic loop:
+
+```
+User input → LLM (OG TEE) → tool call → execute tool → LLM with result → final answer
+```
+
+| Tool | Behaviour |
+|------|-----------|
+| `get_price` | Live price from CoinGecko (ETH, BTC, SOL, BNB, …) |
+| `get_portfolio` | Portfolio holdings |
+| `get_balance` | Wallet balance |
+| `place_order` | Simulated order |
+| `send_funds` | Simulated transfer |
+| `web_search` / `summarize` / `extract_data` | Stubs |
+
+```bash
+curl -X POST http://localhost:8000/api/runs \
+  -H "Content-Type: application/json" \
+  -d '{"agent_id": 1, "user_input": "What is the current price of ETH?"}'
+# output: "The current price of Ethereum (ETH) is $1,980.80 USD."
+# policy_verdict: "pass"
+```
+
 ## API Reference
 
 ### Authentication
 
-Write endpoints require an API key in the `X-API-Key` header.
-
-Generate one:
+Write endpoints require `X-API-Key` header. Generate a key:
 
 ```bash
+# First call — unauthenticated (no key exists yet)
 curl -X POST http://localhost:8000/api/operators/0xYOUR_WALLET/api-key
-```
 
-**First call:** unauthenticated (no key exists yet).
-**Subsequent rotation:** current key must be present in `X-API-Key`.
+# Rotate — provide current key
+curl -X POST http://localhost:8000/api/operators/0xYOUR_WALLET/api-key \
+  -H "X-API-Key: YOUR_CURRENT_KEY"
+
+# Rotate — wallet signature (if key is lost)
+curl -X POST http://localhost:8000/api/operators/0xYOUR_WALLET/api-key \
+  -H "Content-Type: application/json" \
+  -d '{"signature": "0x...", "message": "AgentBond API key request\nWallet: 0x...\nTimestamp: ..."}'
+```
 
 ### Endpoints
 
@@ -111,17 +153,17 @@ curl -X POST http://localhost:8000/api/operators/0xYOUR_WALLET/api-key
 |--------|------|------|-------------|
 | GET | `/api/health` | — | Health check + DB status |
 | GET | `/metrics` | — | Prometheus metrics |
-| POST | `/api/agents` | — | Register agent (creates operator if new) |
+| POST | `/api/agents` | — | Register agent (wallet signature required) |
 | GET | `/api/agents` | — | List all agents |
-| GET | `/api/agents/{id}` | — | Get agent details |
+| GET | `/api/agents/{id}` | — | Agent details including `operator_wallet` |
 | POST | `/api/agents/{id}/versions` | ✓ | Publish new version hash |
 | POST | `/api/agents/{id}/status` | ✓ | Update agent status |
 | POST | `/api/agents/{id}/webhook` | ✓ | Configure webhook URL |
-| POST | `/api/agents/{id}/stake` | ✓ | Stake collateral |
+| POST | `/api/agents/{id}/stake` | ✓ | Stake collateral (accepts `tx_hash` from MetaMask) |
 | POST | `/api/agents/{id}/unstake` | ✓ | Request unstake (7-day cooldown) |
 | GET | `/api/agents/{id}/memories` | — | List agent memories (supports `?limit=N&memory_type=`) |
 | POST | `/api/agents/{id}/memories` | ✓ | Add operator context memory |
-| POST | `/api/policies` | ✓ | Register policy |
+| POST | `/api/policies` | ✓ | Register policy (accepts `chain_policy_id` from MetaMask) |
 | GET | `/api/policies/{id}` | — | Get policy |
 | POST | `/api/policies/{id}/activate` | ✓ | Activate policy for agent |
 | POST | `/api/runs` | — | Execute agent run |
@@ -386,6 +428,7 @@ agentbond/
 ├── scripts/                 # deploy.py, seed.py, demo_run.py
 ├── tests/                   # Python test suite
 ├── docker-compose.yml
+├── docker-compose.vps.yml   # VPS deployment (port-conflict-safe)
 ├── Dockerfile.backend
 ├── Makefile
 └── pyproject.toml

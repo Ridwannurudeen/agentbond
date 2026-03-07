@@ -7,7 +7,7 @@ On-chain warranty layer where operators stake collateral, agent executions are v
 **Live:**
 - Frontend: [agentbond.vercel.app](https://agentbond.vercel.app)
 - Backend API: `http://75.119.153.252/api`
-- API Docs: `http://75.119.153.252/api/docs`
+- API Docs: `http://75.119.153.252/docs`
 
 ## Architecture
 

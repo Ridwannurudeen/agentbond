@@ -117,9 +117,12 @@ async def get_agent(agent_id: int, db: AsyncSession = Depends(get_db)):
     if not agent:
         raise HTTPException(404, "Agent not found")
 
+    operator = await db.get(Operator, agent.operator_id)
+
     return {
         "id": agent.id,
         "operator_id": agent.operator_id,
+        "operator_wallet": operator.wallet_address if operator else None,
         "metadata_uri": agent.metadata_uri,
         "active_version": agent.active_version,
         "status": agent.status.value if agent.status else "active",

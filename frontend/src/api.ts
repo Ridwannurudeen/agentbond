@@ -202,3 +202,8 @@ export function streamRun(
 }
 
 export default api;
+
+export async function fetchScoreHistory(agentId: number) {
+  const { data } = await api.get(`/scores/${agentId}/history`);
+  return data;
+}

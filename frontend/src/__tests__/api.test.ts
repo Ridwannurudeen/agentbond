@@ -160,7 +160,7 @@ describe("executeRun", () => {
     expect(mockedApi.post).toHaveBeenCalledWith("/runs", {
       agent_id: 1,
       user_input: "What is 2+2?",
-    });
+    }, { headers: undefined });
     expect(result).toEqual(response);
   });
 });

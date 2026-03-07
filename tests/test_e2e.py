@@ -54,6 +54,7 @@ class TestFullLifecycle:
         r = await client.post("/api/agents", json={
             "wallet_address": "0xtest1111111111111111111111111111111111",
             "metadata_uri": "ipfs://QmTest",
+            "signature": "0xtest", "message": "test",
         })
         assert r.status_code == 200
         data = r.json()
@@ -66,6 +67,7 @@ class TestFullLifecycle:
         r = await client.post("/api/agents", json={
             "wallet_address": "0xtest2222222222222222222222222222222222",
             "metadata_uri": "ipfs://QmTest2",
+            "signature": "0xtest", "message": "test",
         })
         agent_id = r.json()["id"]
 
@@ -82,6 +84,7 @@ class TestFullLifecycle:
         r = await client.post("/api/agents", json={
             "wallet_address": wallet,
             "metadata_uri": "ipfs://QmLifecycle",
+            "signature": "0xtest", "message": "test",
         })
         assert r.status_code == 200
         agent_id = r.json()["id"]

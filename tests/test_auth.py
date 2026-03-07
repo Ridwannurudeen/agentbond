@@ -58,6 +58,7 @@ class TestApiKeyEndpoint:
         r = await client.post("/api/agents", json={
             "wallet_address": "0xaaaa000000000000000000000000000000000001",
             "metadata_uri": "ipfs://QmAuth",
+            "signature": "0xtest", "message": "test",
         })
         assert r.status_code == 200
         wallet = "0xaaaa000000000000000000000000000000000001"

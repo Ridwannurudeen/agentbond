@@ -226,6 +226,7 @@ class TestMemoryEndpoints:
         r = await client.post("/api/agents", json={
             "wallet_address": "0xmemapi000000000000000000000000000001",
             "metadata_uri": "ipfs://QmMemAPI",
+            "signature": "0xtest", "message": "test",
         })
         agent_id = r.json()["id"]
         wallet = "0xmemapi000000000000000000000000000001"
@@ -238,6 +239,7 @@ class TestMemoryEndpoints:
         r = await client.post("/api/agents", json={
             "wallet_address": "0xmemlist000000000000000000000000000001",
             "metadata_uri": "ipfs://QmList",
+            "signature": "0xtest", "message": "test",
         })
         agent_id = r.json()["id"]
 
@@ -255,6 +257,7 @@ class TestMemoryEndpoints:
         r = await client.post("/api/agents", json={
             "wallet_address": "0xmemadd0000000000000000000000000000001",
             "metadata_uri": "ipfs://QmAdd",
+            "signature": "0xtest", "message": "test",
         })
         agent_id = r.json()["id"]
 
@@ -287,12 +290,14 @@ class TestMemoryEndpoints:
         r1 = await client.post("/api/agents", json={
             "wallet_address": "0xmemown1000000000000000000000000000001",
             "metadata_uri": "ipfs://QmOwn1",
+            "signature": "0xtest", "message": "test",
         })
         agent1_id = r1.json()["id"]
 
         r2 = await client.post("/api/agents", json={
             "wallet_address": "0xmemown2000000000000000000000000000002",
             "metadata_uri": "ipfs://QmOwn2",
+            "signature": "0xtest", "message": "test",
         })
         agent2_id = r2.json()["id"]
 

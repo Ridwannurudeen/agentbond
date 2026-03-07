@@ -311,7 +311,7 @@ class OGExecutionClient:
         if self._approved or self._client is None:
             return
         try:
-            self._client.llm.ensure_opg_approval(opg_amount=0.1)
+            self._client.llm.ensure_opg_approval(opg_amount=10.0)
             self._approved = True
             logger.info("OPG Permit2 approval confirmed")
         except Exception as e:
@@ -448,7 +448,13 @@ class OGExecutionClient:
         # Try direct enum lookup
         if hasattr(og.TEE_LLM, model_id):
             return getattr(og.TEE_LLM, model_id)
-        # Try by value (e.g. "openai/gpt-4o")
+        # Try MODEL_MAP aliases (e.g. legacy "GPT_4O" -> "openai/gpt-4.1-2025-04-14")
+        if model_id in MODEL_MAP:
+            resolved_value = MODEL_MAP[model_id]
+            for member in og.TEE_LLM:
+                if member.value == resolved_value:
+                    return member
+        # Try by value (e.g. "openai/gpt-4.1-2025-04-14")
         for member in og.TEE_LLM:
             if member.value == model_id:
                 return member

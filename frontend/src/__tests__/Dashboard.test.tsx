@@ -8,6 +8,7 @@ vi.mock("../api", () => ({
   fetchDashboardStats: vi.fn(),
   fetchAgents: vi.fn(),
   fetchRuns: vi.fn(),
+  streamRun: vi.fn(),
 }));
 
 import * as api from "../api";
@@ -145,9 +146,7 @@ describe("Dashboard — recent runs", () => {
     mockRuns.mockResolvedValue([]);
     renderDashboard();
     await waitFor(() =>
-      expect(
-        screen.getByText("No runs yet. Select an agent and execute a run.")
-      ).toBeInTheDocument()
+      expect(screen.getByText("No runs yet.")).toBeInTheDocument()
     );
   });
 
@@ -163,14 +162,14 @@ describe("Dashboard — recent runs", () => {
     ]);
     renderDashboard();
     await waitFor(() => expect(screen.getByText("pass")).toBeInTheDocument());
-    expect(screen.getByText("abc123def456...")).toBeInTheDocument();
+    expect(screen.getByText("abc123def456…")).toBeInTheDocument();
   });
 
   it("shows View all → link to /runs", async () => {
     mockRuns.mockResolvedValue([]);
     renderDashboard();
     await waitFor(() => {
-      const link = screen.getByRole("link", { name: "View all →" });
+      const link = screen.getByRole("link", { name: /view all/i });
       expect(link).toHaveAttribute("href", "/runs");
     });
   });

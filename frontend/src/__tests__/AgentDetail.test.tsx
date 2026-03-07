@@ -12,6 +12,7 @@ vi.mock("../api", () => ({
   fetchRuns: vi.fn(),
   fetchClaims: vi.fn(),
   fetchScore: vi.fn(),
+  fetchScoreHistory: vi.fn(),
   fetchPolicies: vi.fn(),
   fetchAgentMemories: vi.fn(),
   activatePolicy: vi.fn(),
@@ -23,6 +24,7 @@ import {
   fetchRuns,
   fetchClaims,
   fetchScore,
+  fetchScoreHistory,
   fetchPolicies,
   fetchAgentMemories,
   streamRun,
@@ -85,6 +87,7 @@ beforeEach(() => {
   (fetchRuns as ReturnType<typeof vi.fn>).mockResolvedValue([]);
   (fetchClaims as ReturnType<typeof vi.fn>).mockResolvedValue([]);
   (fetchScore as ReturnType<typeof vi.fn>).mockResolvedValue({ score: 95, snapshots: [] });
+  (fetchScoreHistory as ReturnType<typeof vi.fn>).mockResolvedValue([]);
   (fetchPolicies as ReturnType<typeof vi.fn>).mockResolvedValue([]);
   (fetchAgentMemories as ReturnType<typeof vi.fn>).mockResolvedValue([]);
   (streamRun as ReturnType<typeof vi.fn>).mockImplementation(() => {});

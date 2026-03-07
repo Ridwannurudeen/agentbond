@@ -17,7 +17,7 @@ On-chain warranty layer where operators stake collateral, agent executions are v
 | Backend | FastAPI + SQLAlchemy async | Orchestration, policy engine, claim verification, scoring |
 | AI Inference | OpenGradient SDK (TEE) | Verifiable LLM execution with x402 settlement on Base Sepolia |
 | Agent Memory | PostgreSQL + Alembic | Per-agent run history injected into LLM context |
-| Frontend | React + TypeScript + Vite | Operator and user dashboard with live SSE streaming |
+| Frontend | React + TypeScript + Vite | Operator and user dashboard with live SSE streaming, score history charts, run playground |
 | CLI | Click | Operator management from the terminal |
 | Chain | Base Sepolia (chain 84532) | Deployed contracts |
 
@@ -93,6 +93,30 @@ cd contracts && npx hardhat test
 python scripts/deploy.py
 ```
 
+## Frontend
+
+The dashboard at [agentbond.vercel.app](https://agentbond.vercel.app) exposes the full system state and lets anyone interact with live agents:
+
+| Page | What it shows |
+|------|---------------|
+| Dashboard | Global stats, agent table with trust scores, recent runs, **Quick Run playground** |
+| Agent Detail | Per-agent stats, **score history chart**, policy rules as chips, run form with SSE stream, memory log |
+| Run Detail | Transcript, proof hashes (copyable), independent replay, claim form (shown automatically on failing runs) |
+| Claims | Full claim history with auto-verification status |
+| Operator | Step-by-step on-chain flow: register agent → policy → stake → execute |
+
+### Quick Run
+
+The Dashboard Quick Run lets you try any active agent without navigating to its detail page — select agent, type a prompt, see live SSE progress (memory load → inference → policy check → done) and the output inline.
+
+### Score History
+
+Each agent's detail page shows a line chart of trust score over time pulled from `/api/scores/{agentId}/history`. Score updates after every run: violations degrade it, clean runs recover it.
+
+### Policy Rules
+
+Policy constraints are displayed as colored chips rather than raw JSON — allowed tools in green, prohibited targets in red, value/frequency limits in blue and gray.
+
 ## Operator Flow (MetaMask)
 
 The Operator Console at [agentbond.vercel.app](https://agentbond.vercel.app) walks through the full on-chain flow:
@@ -123,8 +147,9 @@ User input → LLM (OG TEE) → tool call → execute tool → LLM with result �
 curl -X POST http://localhost:8000/api/runs \
   -H "Content-Type: application/json" \
   -d '{"agent_id": 1, "user_input": "What is the current price of ETH?"}'
-# output: "The current price of Ethereum (ETH) is $1,980.80 USD."
+# output: "The current price of Ethereum (ETH) is $1,984.11 USD."
 # policy_verdict: "pass"
+# evidence_hash: "616e274504f2d5274cbc13d885a1701e..."
 ```
 
 ## API Reference
@@ -421,6 +446,7 @@ agentbond/
 ├── frontend/
 │   └── src/
 │       ├── pages/           # Dashboard, Runs, RunDetail, Claims, AgentDetail, Operator
+│       ├── components/      # Layout, CopyButton
 │       ├── context/         # WalletContext (MetaMask integration)
 │       └── __tests__/       # Vitest test suite
 ├── cli/                     # Click CLI (agentbond command)

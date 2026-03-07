@@ -10,6 +10,7 @@ import {
   Wallet,
   LogOut,
   Zap,
+  Trophy,
 } from "lucide-react";
 import { motion } from "framer-motion";
 
@@ -17,6 +18,7 @@ const navItems = [
   { path: "/", label: "Dashboard", icon: LayoutDashboard, exact: true },
   { path: "/runs", label: "Runs", icon: Activity, exact: false },
   { path: "/claims", label: "Claims", icon: FileWarning, exact: false },
+  { path: "/leaderboard", label: "Leaderboard", icon: Trophy, exact: false },
   { path: "/operator", label: "Operator", icon: Settings, exact: false },
 ];
 

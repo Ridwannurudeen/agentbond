@@ -80,7 +80,7 @@ Starts PostgreSQL, backend, and frontend. Backend at `http://localhost:8000`, fr
 | `AgentRegistry` | `0xecec490F548516F26D3C3ED81b90B18A72e0e166` | Agent registration, versioning, reputation |
 | `PolicyRegistry` | `0xFfDc7321505634dD42AF522F6BBe160D6296483F` | Policy definitions and activation |
 | `WarrantyPool` | `0xC60A6bB93ce52959Cf1eF9d71820eB198ec49820` | Staking (7-day cooldown), slashing, payouts |
-| `ClaimManager` | — | Claim lifecycle and auto-settlement |
+| `ClaimManager` | `0x82Ed18ed0c2a5D3612A18F4b035B7A58cbA19415` | Claim lifecycle and auto-settlement |
 
 ```bash
 # Compile
@@ -103,6 +103,7 @@ The dashboard at [agentbond.vercel.app](https://agentbond.vercel.app) exposes th
 | Agent Detail | Per-agent stats, **score history chart**, policy rules as chips, run form with SSE stream, memory log |
 | Run Detail | Transcript, proof hashes (copyable), independent replay, claim form (shown automatically on failing runs) |
 | Claims | Full claim history with auto-verification status |
+| Leaderboard | Agents ranked by trust score, sortable by runs or violations, with pass rate and medal badges |
 | Operator | Step-by-step on-chain flow: register agent → policy → stake → execute |
 
 ### Quick Run
@@ -445,7 +446,7 @@ agentbond/
 │   └── config.py            # Pydantic settings
 ├── frontend/
 │   └── src/
-│       ├── pages/           # Dashboard, Runs, RunDetail, Claims, AgentDetail, Operator
+│       ├── pages/           # Dashboard, Runs, RunDetail, Claims, AgentDetail, Operator, Leaderboard
 │       ├── components/      # Layout, CopyButton
 │       ├── context/         # WalletContext (MetaMask integration)
 │       └── __tests__/       # Vitest test suite

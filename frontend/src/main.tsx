@@ -7,6 +7,7 @@ import RunDetail from "./pages/RunDetail";
 import Runs from "./pages/Runs";
 import Claims from "./pages/Claims";
 import Operator from "./pages/Operator";
+import Leaderboard from "./pages/Leaderboard";
 import Layout from "./components/Layout";
 import { WalletProvider } from "./context/WalletContext";
 import "./index.css";
@@ -22,6 +23,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             <Route path="/runs" element={<Runs />} />
             <Route path="/runs/:id" element={<RunDetail />} />
             <Route path="/claims" element={<Claims />} />
+            <Route path="/leaderboard" element={<Leaderboard />} />
             <Route path="/operator" element={<Operator />} />
           </Routes>
         </Layout>

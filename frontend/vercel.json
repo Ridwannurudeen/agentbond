@@ -10,7 +10,7 @@
   "rewrites": [
     {
       "source": "/api/:path*",
-      "destination": "http://75.119.153.252/api/:path*"
+      "destination": "https://agentbond.gudman.xyz/api/:path*"
     },
     {
       "source": "/((?!api).*)",

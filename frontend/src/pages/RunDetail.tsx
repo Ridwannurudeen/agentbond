@@ -5,6 +5,7 @@ import { useWallet } from "../context/WalletContext";
 import { CopyButton } from "../components/CopyButton";
 import { ChevronLeft, RefreshCw, ShieldAlert, CheckCircle2, XCircle } from "lucide-react";
 import { motion } from "framer-motion";
+import type { Run, ReplayResult, ClaimResult } from "../types";
 
 const REASON_CODES = [
   "TOOL_WHITELIST_VIOLATION",
@@ -28,17 +29,17 @@ export default function RunDetail() {
   const { id } = useParams<{ id: string }>();
   const { address } = useWallet();
 
-  const [run, setRun] = useState<any>(null);
+  const [run, setRun] = useState<Run | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [replay, setReplay] = useState<any>(null);
+  const [replay, setReplay] = useState<ReplayResult | null>(null);
   const [replaying, setReplaying] = useState(false);
 
   const [claimantAddress, setClaimantAddress] = useState("");
   const [reasonCode, setReasonCode] = useState(REASON_CODES[0]);
   const [submittingClaim, setSubmittingClaim] = useState(false);
-  const [claimResult, setClaimResult] = useState<any>(null);
+  const [claimResult, setClaimResult] = useState<ClaimResult | null>(null);
   const [claimError, setClaimError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -55,7 +56,7 @@ export default function RunDetail() {
     if (!id) return;
     setReplaying(true); setReplay(null);
     try { setReplay(await replayRun(id)); }
-    catch (err: any) { setReplay({ error: err.response?.data?.detail || err.message }); }
+    catch (err: unknown) { const e = err as { response?: { data?: { detail?: string } }; message?: string }; setReplay({ error: e.response?.data?.detail || e.message, proof_valid: false, input_hash_match: false, policy_verdict: "", original_verdict: "" }); }
     setReplaying(false);
   };
 
@@ -64,7 +65,7 @@ export default function RunDetail() {
     if (!run) return;
     setSubmittingClaim(true); setClaimResult(null); setClaimError(null);
     try { setClaimResult(await submitClaim(run.run_id, run.agent_id, claimantAddress, reasonCode)); }
-    catch (err: any) { setClaimError(err.response?.data?.detail || err.message || "Failed to submit claim"); }
+    catch (err: unknown) { const e = err as { response?: { data?: { detail?: string } }; message?: string }; setClaimError(e.response?.data?.detail || e.message || "Failed to submit claim"); }
     setSubmittingClaim(false);
   };
 
@@ -100,11 +101,11 @@ export default function RunDetail() {
         </div>
       </motion.div>
 
-      <div className="grid grid-cols-[1fr,1fr] gap-5 mb-5">
+      <div className="grid grid-cols-1 md:grid-cols-[1fr,1fr] gap-5 mb-5">
         {/* Run info */}
         <div className="glass-card p-5">
           <h3 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-4">Run Info</h3>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <InfoRow label="Agent">
               <Link to={`/agents/${run.agent_id}`} className="text-violet-400">#{run.agent_id}</Link>
             </InfoRow>
@@ -189,7 +190,7 @@ export default function RunDetail() {
             {replay.error ? (
               <div className="text-red-400 text-sm">{replay.error}</div>
             ) : (
-              <div className="grid grid-cols-2 gap-4 text-sm">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
                 {[
                   { label: "Proof Valid", value: replay.proof_valid ? "Yes" : "No", ok: replay.proof_valid },
                   { label: "Input Hash Match", value: replay.input_hash_match ? "Yes" : "No", ok: replay.input_hash_match },

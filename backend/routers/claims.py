@@ -12,6 +12,7 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from web3 import Web3
 
+from backend.auth import verify_wallet_signature
 from backend.contracts.interface import contracts
 from backend.db import get_db
 from sqlalchemy.orm import selectinload
@@ -20,6 +21,7 @@ from backend.models.schema import Claim, Run, Agent, ClaimStatus
 from backend.services.claim_verifier import verify_claim
 from backend.services.reputation import snapshot_score
 from backend.services.webhooks import notify_claim_submitted, notify_claim_resolved
+from backend.schemas import SubmitClaimResponse, ClaimDetailResponse, ClaimListItem
 from backend.validation import validate_reason_code
 from backend.metrics import CLAIMS_TOTAL
 
@@ -35,11 +37,17 @@ class SubmitClaimRequest(BaseModel):
     claimant_address: str
     reason_code: str
     evidence: dict | None = None
+    signature: str  # EIP-191 wallet signature proving claimant_address ownership
+    message: str    # the signed message
 
 
-@router.post("")
+@router.post("", response_model=SubmitClaimResponse)
 async def submit_claim(req: SubmitClaimRequest, db: AsyncSession = Depends(get_db)):
     """Submit a warranty claim against a run."""
+    # Verify wallet signature — claimant must prove address ownership
+    if not verify_wallet_signature(req.message, req.signature, req.claimant_address):
+        raise HTTPException(401, "Signature verification failed: claimant address ownership not proven")
+
     # Validate reason code
     try:
         validate_reason_code(req.reason_code)
@@ -169,7 +177,7 @@ async def submit_claim(req: SubmitClaimRequest, db: AsyncSession = Depends(get_d
     }
 
 
-@router.get("/{claim_id}")
+@router.get("/{claim_id}", response_model=ClaimDetailResponse)
 async def get_claim(claim_id: int, db: AsyncSession = Depends(get_db)):
     """Get claim status and details."""
     result = await db.execute(
@@ -194,11 +202,12 @@ async def get_claim(claim_id: int, db: AsyncSession = Depends(get_db)):
     }
 
 
-@router.get("")
+@router.get("", response_model=list[ClaimListItem])
 async def list_claims(
     agent_id: int | None = None,
     status: str | None = None,
     limit: int = 50,
+    offset: int = 0,
     db: AsyncSession = Depends(get_db),
 ):
     """List claims with optional filters."""
@@ -207,6 +216,7 @@ async def list_claims(
         .options(selectinload(Claim.run))
         .order_by(Claim.id.desc())
         .limit(limit)
+        .offset(offset)
     )
     if agent_id:
         query = query.where(Claim.agent_id == agent_id)

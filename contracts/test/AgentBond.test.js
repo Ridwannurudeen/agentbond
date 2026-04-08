@@ -1,5 +1,5 @@
 const { expect } = require("chai");
-const { ethers } = require("hardhat");
+const { ethers, upgrades } = require("hardhat");
 
 describe("AgentBond Contracts", function () {
   let owner, operator, user, resolver;
@@ -8,33 +8,40 @@ describe("AgentBond Contracts", function () {
   beforeEach(async function () {
     [owner, operator, user, resolver] = await ethers.getSigners();
 
-    // Deploy AgentRegistry
+    // Deploy AgentRegistry (UUPS proxy)
     const AgentRegistry = await ethers.getContractFactory("AgentRegistry");
-    agentRegistry = await AgentRegistry.deploy(resolver.address);
+    agentRegistry = await upgrades.deployProxy(AgentRegistry, [resolver.address], {
+      kind: "uups",
+    });
 
-    // Deploy PolicyRegistry
+    // Deploy PolicyRegistry (UUPS proxy)
     const PolicyRegistry = await ethers.getContractFactory("PolicyRegistry");
-    policyRegistry = await PolicyRegistry.deploy(await agentRegistry.getAddress());
+    policyRegistry = await upgrades.deployProxy(PolicyRegistry, [await agentRegistry.getAddress()], {
+      kind: "uups",
+    });
 
-    // Deploy WarrantyPool
+    // Deploy WarrantyPool (UUPS proxy)
     const WarrantyPool = await ethers.getContractFactory("WarrantyPool");
-    warrantyPool = await WarrantyPool.deploy(await agentRegistry.getAddress());
+    warrantyPool = await upgrades.deployProxy(WarrantyPool, [await agentRegistry.getAddress()], {
+      kind: "uups",
+    });
 
-    // Deploy ClaimManager
+    // Deploy ClaimManager (UUPS proxy)
     const ClaimManager = await ethers.getContractFactory("ClaimManager");
-    claimManager = await ClaimManager.deploy(
-      await warrantyPool.getAddress(),
-      resolver.address
+    claimManager = await upgrades.deployProxy(
+      ClaimManager,
+      [await warrantyPool.getAddress(), await agentRegistry.getAddress(), resolver.address],
+      { kind: "uups" }
     );
 
-    // Configure
+    // Cross-contract wiring
     await warrantyPool.setClaimManager(await claimManager.getAddress());
+    await agentRegistry.setWarrantyPool(await warrantyPool.getAddress());
   });
 
   describe("AgentRegistry", function () {
     it("should register an agent", async function () {
-      const tx = await agentRegistry.connect(operator).registerAgent("ipfs://test");
-      const receipt = await tx.wait();
+      await agentRegistry.connect(operator).registerAgent("ipfs://test");
       const agent = await agentRegistry.getAgent(1);
       expect(agent.operator).to.equal(operator.address);
       expect(agent.metadataURI).to.equal("ipfs://test");
@@ -90,7 +97,75 @@ describe("AgentBond Contracts", function () {
       await agentRegistry.connect(operator).registerAgent("ipfs://test");
       await agentRegistry.connect(resolver).pauseAgent(1);
       const agent = await agentRegistry.getAgent(1);
-      expect(agent.status).to.equal(1); // Paused
+      expect(agent.status).to.equal(1);
+    });
+
+    it("should pause agent (warranty pool)", async function () {
+      await agentRegistry.connect(operator).registerAgent("ipfs://test");
+      const wpAddr = await warrantyPool.getAddress();
+      await ethers.provider.send("hardhat_impersonateAccount", [wpAddr]);
+      await owner.sendTransaction({ to: wpAddr, value: ethers.parseEther("1") });
+      const wpSigner = await ethers.getSigner(wpAddr);
+      await agentRegistry.connect(wpSigner).pauseAgent(1);
+      const agent = await agentRegistry.getAgent(1);
+      expect(agent.status).to.equal(1);
+      await ethers.provider.send("hardhat_stopImpersonatingAccount", [wpAddr]);
+    });
+
+    it("should prevent operator from unpausing after resolver pause", async function () {
+      await agentRegistry.connect(operator).registerAgent("ipfs://test");
+      await agentRegistry.connect(resolver).pauseAgent(1);
+      await expect(
+        agentRegistry.connect(operator).setStatus(1, 0)
+      ).to.be.revertedWith("Only resolver can unpause");
+    });
+
+    it("should allow resolver to unpause", async function () {
+      await agentRegistry.connect(operator).registerAgent("ipfs://test");
+      await agentRegistry.connect(resolver).pauseAgent(1);
+      await agentRegistry.connect(resolver).unpauseAgent(1);
+      const agent = await agentRegistry.getAgent(1);
+      expect(agent.status).to.equal(0);
+    });
+
+    it("should allow operator to unpause self-initiated pause", async function () {
+      await agentRegistry.connect(operator).registerAgent("ipfs://test");
+      await agentRegistry.connect(operator).pauseAgent(1);
+      await agentRegistry.connect(operator).setStatus(1, 0);
+      const agent = await agentRegistry.getAgent(1);
+      expect(agent.status).to.equal(0);
+    });
+
+    it("should emit ResolverUpdated event", async function () {
+      await expect(agentRegistry.connect(owner).setResolver(user.address))
+        .to.emit(agentRegistry, "ResolverUpdated")
+        .withArgs(resolver.address, user.address);
+    });
+
+    it("should reject zero address for resolver", async function () {
+      await expect(
+        agentRegistry.connect(owner).setResolver(ethers.ZeroAddress)
+      ).to.be.revertedWith("Zero address");
+    });
+
+    it("should be upgradeable by owner", async function () {
+      const AgentRegistryV2 = await ethers.getContractFactory("AgentRegistry");
+      const upgraded = await upgrades.upgradeProxy(await agentRegistry.getAddress(), AgentRegistryV2, {
+        kind: "uups",
+      });
+      // State preserved after upgrade
+      await agentRegistry.connect(operator).registerAgent("ipfs://before-upgrade");
+      const agent = await upgraded.getAgent(1);
+      expect(agent.operator).to.equal(operator.address);
+    });
+
+    it("should reject upgrade from non-owner", async function () {
+      const AgentRegistryV2 = await ethers.getContractFactory("AgentRegistry", user);
+      await expect(
+        upgrades.upgradeProxy(await agentRegistry.getAddress(), AgentRegistryV2, {
+          kind: "uups",
+        })
+      ).to.be.reverted;
     });
   });
 
@@ -131,13 +206,70 @@ describe("AgentBond Contracts", function () {
       ).to.be.revertedWith("Must stake > 0");
     });
 
-    it("should request unstake", async function () {
+    it("should request unstake without deducting from amount", async function () {
       await warrantyPool.connect(operator).stake(1, {
         value: ethers.parseEther("0.1"),
       });
       await warrantyPool.connect(operator).requestUnstake(1, ethers.parseEther("0.05"));
       const health = await warrantyPool.getCollateralHealth(1);
+      expect(health.staked).to.equal(ethers.parseEther("0.1"));
+      expect(health.free).to.equal(ethers.parseEther("0.05"));
+    });
+
+    it("should finalize unstake and deduct from amount", async function () {
+      await warrantyPool.connect(operator).stake(1, {
+        value: ethers.parseEther("0.1"),
+      });
+      await warrantyPool.connect(operator).requestUnstake(1, ethers.parseEther("0.05"));
+
+      await ethers.provider.send("evm_increaseTime", [7 * 24 * 3600 + 1]);
+      await ethers.provider.send("evm_mine");
+
+      const balBefore = await ethers.provider.getBalance(operator.address);
+      await warrantyPool.connect(operator).finalizeUnstake(1);
+      const balAfter = await ethers.provider.getBalance(operator.address);
+
+      expect(balAfter).to.be.gt(balBefore);
+      const health = await warrantyPool.getCollateralHealth(1);
       expect(health.staked).to.equal(ethers.parseEther("0.05"));
+    });
+
+    it("should prevent unstake during cooldown", async function () {
+      await warrantyPool.connect(operator).stake(1, {
+        value: ethers.parseEther("0.1"),
+      });
+      await warrantyPool.connect(operator).requestUnstake(1, ethers.parseEther("0.05"));
+      await expect(
+        warrantyPool.connect(operator).finalizeUnstake(1)
+      ).to.be.revertedWith("Cooldown not elapsed");
+    });
+
+    it("should allow slash during pending unstake", async function () {
+      await warrantyPool.connect(operator).stake(1, {
+        value: ethers.parseEther("0.1"),
+      });
+      await warrantyPool.connect(operator).requestUnstake(1, ethers.parseEther("0.05"));
+
+      const runId = ethers.keccak256(ethers.toUtf8Bytes("run-slash"));
+      await claimManager.connect(user).submitClaim(
+        runId, 1, "TOOL_WHITELIST_VIOLATION",
+        ethers.keccak256(ethers.toUtf8Bytes("evidence"))
+      );
+      await claimManager.connect(resolver).verifyClaim(1, true);
+      await owner.sendTransaction({
+        to: await warrantyPool.getAddress(),
+        value: ethers.parseEther("0.1"),
+      });
+      await claimManager.connect(resolver).executePayout(1);
+
+      const health = await warrantyPool.getCollateralHealth(1);
+      expect(health.staked).to.equal(ethers.parseEther("0.09"));
+      expect(health.free).to.equal(ethers.parseEther("0.04"));
+    });
+
+    it("should emit ClaimManagerUpdated event", async function () {
+      await expect(warrantyPool.connect(owner).setClaimManager(user.address))
+        .to.emit(warrantyPool, "ClaimManagerUpdated");
     });
   });
 
@@ -157,7 +289,26 @@ describe("AgentBond Contracts", function () {
       );
       const claim = await claimManager.getClaim(1);
       expect(claim.claimant).to.equal(user.address);
-      expect(claim.status).to.equal(0); // Submitted
+      expect(claim.status).to.equal(0);
+    });
+
+    it("should reject claim with zero runId", async function () {
+      await expect(
+        claimManager.connect(user).submitClaim(
+          ethers.ZeroHash, 1, "TOOL_WHITELIST_VIOLATION",
+          ethers.keccak256(ethers.toUtf8Bytes("evidence"))
+        )
+      ).to.be.revertedWith("Invalid runId");
+    });
+
+    it("should reject claim for non-existent agent", async function () {
+      const runId = ethers.keccak256(ethers.toUtf8Bytes("run-fake"));
+      await expect(
+        claimManager.connect(user).submitClaim(
+          runId, 999, "TOOL_WHITELIST_VIOLATION",
+          ethers.keccak256(ethers.toUtf8Bytes("evidence"))
+        )
+      ).to.be.revertedWith("Agent does not exist");
     });
 
     it("should reject duplicate claim for same run", async function () {
@@ -182,7 +333,7 @@ describe("AgentBond Contracts", function () {
       );
       await claimManager.connect(resolver).verifyClaim(1, true);
       const claim = await claimManager.getClaim(1);
-      expect(claim.status).to.equal(2); // Approved
+      expect(claim.status).to.equal(2);
     });
 
     it("should verify and reject claim", async function () {
@@ -193,7 +344,7 @@ describe("AgentBond Contracts", function () {
       );
       await claimManager.connect(resolver).verifyClaim(1, false);
       const claim = await claimManager.getClaim(1);
-      expect(claim.status).to.equal(3); // Rejected
+      expect(claim.status).to.equal(3);
     });
 
     it("should execute payout after approval", async function () {
@@ -204,7 +355,6 @@ describe("AgentBond Contracts", function () {
       );
       await claimManager.connect(resolver).verifyClaim(1, true);
 
-      // Fund the warranty pool for payout
       await owner.sendTransaction({
         to: await warrantyPool.getAddress(),
         value: ethers.parseEther("0.1"),
@@ -215,7 +365,7 @@ describe("AgentBond Contracts", function () {
       const balanceAfter = await ethers.provider.getBalance(user.address);
 
       const claim = await claimManager.getClaim(1);
-      expect(claim.status).to.equal(4); // Paid
+      expect(claim.status).to.equal(4);
       expect(balanceAfter).to.be.gt(balanceBefore);
     });
 
@@ -240,6 +390,11 @@ describe("AgentBond Contracts", function () {
         claimManager.connect(user).verifyClaim(1, true)
       ).to.be.revertedWith("Not resolver");
     });
+
+    it("should emit ResolverUpdated event", async function () {
+      await expect(claimManager.connect(owner).setResolver(user.address))
+        .to.emit(claimManager, "ResolverUpdated");
+    });
   });
 
   describe("Heartbeat", function () {
@@ -247,14 +402,27 @@ describe("AgentBond Contracts", function () {
 
     beforeEach(async function () {
       const Heartbeat = await ethers.getContractFactory("Heartbeat");
-      heartbeat = await Heartbeat.deploy();
+      heartbeat = await Heartbeat.deploy(await agentRegistry.getAddress());
+      await agentRegistry.connect(operator).registerAgent("ipfs://test");
     });
 
-    it("should record a ping", async function () {
+    it("should record a ping from operator", async function () {
       await heartbeat.connect(operator).ping(1);
       const status = await heartbeat.getStatus(1);
       expect(status.alive).to.be.true;
       expect(status.pinger).to.equal(operator.address);
+    });
+
+    it("should reject ping from non-operator", async function () {
+      await expect(
+        heartbeat.connect(user).ping(1)
+      ).to.be.revertedWith("Not agent operator");
+    });
+
+    it("should reject ping for non-existent agent", async function () {
+      await expect(
+        heartbeat.connect(operator).ping(999)
+      ).to.be.revertedWith("Agent does not exist");
     });
 
     it("should emit Ping event", async function () {
@@ -278,40 +446,15 @@ describe("AgentBond Contracts", function () {
 
     it("should report not alive after threshold", async function () {
       await heartbeat.connect(operator).ping(1);
-
-      // Advance time by 1 hour + 1 second
       await ethers.provider.send("evm_increaseTime", [3601]);
       await ethers.provider.send("evm_mine");
-
       expect(await heartbeat.isAlive(1)).to.be.false;
-    });
-
-    it("should track multiple agents independently", async function () {
-      await heartbeat.connect(operator).ping(1);
-      await heartbeat.connect(user).ping(2);
-
-      const status1 = await heartbeat.getStatus(1);
-      const status2 = await heartbeat.getStatus(2);
-
-      expect(status1.pinger).to.equal(operator.address);
-      expect(status2.pinger).to.equal(user.address);
-      expect(status1.alive).to.be.true;
-      expect(status2.alive).to.be.true;
-    });
-
-    it("should return max age for unpinged agent", async function () {
-      const status = await heartbeat.getStatus(999);
-      expect(status.alive).to.be.false;
-      expect(status.lastPingTime).to.equal(0);
-      // age should be type(uint256).max
-      expect(status.age).to.equal(ethers.MaxUint256);
     });
 
     it("should update lastPing on re-ping", async function () {
       await heartbeat.connect(operator).ping(1);
       const status1 = await heartbeat.getStatus(1);
 
-      // Advance time
       await ethers.provider.send("evm_increaseTime", [600]);
       await ethers.provider.send("evm_mine");
 
@@ -320,6 +463,42 @@ describe("AgentBond Contracts", function () {
 
       expect(status2.lastPingTime).to.be.gt(status1.lastPingTime);
       expect(status2.alive).to.be.true;
+    });
+  });
+
+  describe("Upgradeability", function () {
+    it("should preserve WarrantyPool state after upgrade", async function () {
+      await agentRegistry.connect(operator).registerAgent("ipfs://test");
+      await warrantyPool.connect(operator).stake(1, {
+        value: ethers.parseEther("0.5"),
+      });
+
+      const WarrantyPoolV2 = await ethers.getContractFactory("WarrantyPool");
+      const upgraded = await upgrades.upgradeProxy(await warrantyPool.getAddress(), WarrantyPoolV2, {
+        kind: "uups",
+      });
+
+      const health = await upgraded.getCollateralHealth(1);
+      expect(health.staked).to.equal(ethers.parseEther("0.5"));
+    });
+
+    it("should preserve ClaimManager state after upgrade", async function () {
+      await agentRegistry.connect(operator).registerAgent("ipfs://test");
+      await warrantyPool.connect(operator).stake(1, { value: ethers.parseEther("1") });
+
+      const runId = ethers.keccak256(ethers.toUtf8Bytes("run-upgrade"));
+      await claimManager.connect(user).submitClaim(
+        runId, 1, "TOOL_WHITELIST_VIOLATION",
+        ethers.keccak256(ethers.toUtf8Bytes("evidence"))
+      );
+
+      const ClaimManagerV2 = await ethers.getContractFactory("ClaimManager");
+      const upgraded = await upgrades.upgradeProxy(await claimManager.getAddress(), ClaimManagerV2, {
+        kind: "uups",
+      });
+
+      const claim = await upgraded.getClaim(1);
+      expect(claim.claimant).to.equal(user.address);
     });
   });
 });

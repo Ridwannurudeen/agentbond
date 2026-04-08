@@ -15,8 +15,9 @@ from backend.config import settings
 from backend.db import init_db, get_db
 from backend.routers import agents, runs, claims, policies, scores, operators
 from backend.middleware import RateLimitMiddleware, MetricsMiddleware
-from backend.auth import generate_api_key, verify_wallet_signature
+from backend.auth import generate_api_key, hash_api_key, verify_wallet_signature
 from backend.models.schema import Operator
+from backend.schemas import HealthResponse, OperatorKeyResponse, DashboardStats
 
 # ---------------------------------------------------------------------------
 # Structured JSON logging
@@ -94,7 +95,7 @@ app.include_router(operators.router)
 # Health check
 # ---------------------------------------------------------------------------
 
-@app.get("/api/health")
+@app.get("/api/health", response_model=HealthResponse)
 async def health(db: AsyncSession = Depends(get_db)):
     """Liveness + readiness probe. Checks DB connectivity."""
     db_ok = False
@@ -129,7 +130,7 @@ async def metrics():
 # Operator API key generation
 # ---------------------------------------------------------------------------
 
-@app.post("/api/operators/{wallet_address}/api-key")
+@app.post("/api/operators/{wallet_address}/api-key", response_model=OperatorKeyResponse)
 async def generate_operator_api_key(
     wallet_address: str,
     request: Request,
@@ -157,21 +158,21 @@ async def generate_operator_api_key(
     # If operator already has a key, require proof of ownership to rotate
     if operator.api_key:
         provided = request.headers.get("x-api-key") or request.headers.get("X-API-Key")
-        if provided and provided == operator.api_key:
-            pass  # authenticated via current key
+        if provided and hash_api_key(provided) == operator.api_key:
+            pass  # authenticated via current key (compare hashes)
         elif signature and message and verify_wallet_signature(message, signature, wallet_address):
             pass  # authenticated via wallet signature
         else:
             raise HTTPException(401, "Provide current X-API-Key header or a valid wallet signature to re-issue key.")
 
     key = generate_api_key()
-    operator.api_key = key
+    operator.api_key = hash_api_key(key)  # store hash, never plaintext
     await db.commit()
 
     return {
         "operator_id": operator.id,
         "wallet_address": operator.wallet_address,
-        "api_key": key,
+        "api_key": key,  # return plaintext only once
     }
 
 
@@ -179,7 +180,7 @@ async def generate_operator_api_key(
 # Dashboard stats
 # ---------------------------------------------------------------------------
 
-@app.get("/api/dashboard/stats")
+@app.get("/api/dashboard/stats", response_model=DashboardStats)
 async def dashboard_stats():
     """Redirect to scores router stats endpoint."""
     from backend.db import async_session

@@ -8,9 +8,12 @@ build/
 venv/
 node_modules/
 artifacts/
+contracts/artifacts/
+contracts/cache/
 cache/
 typechain-types/
 coverage/
 *.log
 .pytest_cache/
 *.db
+.vercel/

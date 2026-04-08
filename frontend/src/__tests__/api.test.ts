@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import axios from "axios";
 
 // Mock axios so no real HTTP calls are made
 vi.mock("axios", () => {

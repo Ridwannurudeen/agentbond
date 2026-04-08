@@ -1,7 +1,6 @@
 /**
  * Component tests for AgentDetail page — SSE streaming UI and memory panel.
  */
-import React from "react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
@@ -193,7 +192,7 @@ describe("AgentDetail — SSE streaming run", () => {
   });
 
   it("displays 'Memory loaded' label when memory_loaded event fires", async () => {
-    let capturedOnEvent: ((ev: string, data: any) => void) | null = null;
+    let capturedOnEvent: ((ev: string, data: Record<string, unknown>) => void) | null = null;
 
     (streamRun as ReturnType<typeof vi.fn>).mockImplementation(
       (_id, _input, onEvent) => { capturedOnEvent = onEvent; }
@@ -216,7 +215,7 @@ describe("AgentDetail — SSE streaming run", () => {
   });
 
   it("displays 'Run stored' label after complete event", async () => {
-    let capturedOnEvent: ((ev: string, data: any) => void) | null = null;
+    let capturedOnEvent: ((ev: string, data: Record<string, unknown>) => void) | null = null;
     let capturedOnDone: (() => void) | null = null;
 
     (streamRun as ReturnType<typeof vi.fn>).mockImplementation(

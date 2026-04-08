@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-contract PolicyRegistry {
+import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+
+contract PolicyRegistry is Initializable, OwnableUpgradeable, UUPSUpgradeable {
     enum PolicyStatus { Active, Deprecated }
 
     struct Policy {
@@ -12,15 +16,16 @@ contract PolicyRegistry {
         uint256 createdAt;
     }
 
-    uint256 public nextPolicyId = 1;
+    uint256 public nextPolicyId;
     mapping(uint256 => Policy) public policies;
-    mapping(uint256 => uint256) public activePolicy; // agentId => policyId
+    mapping(uint256 => uint256) public activePolicy;
 
     address public agentRegistry;
 
     event PolicyRegistered(uint256 indexed policyId, uint256 indexed agentId);
     event PolicyActivated(uint256 indexed agentId, uint256 indexed policyId);
     event PolicyDeprecated(uint256 indexed policyId);
+    event AgentRegistryUpdated(address indexed oldRegistry, address indexed newRegistry);
 
     modifier onlyAgentOperator(uint256 agentId) {
         (bool success, bytes memory data) = agentRegistry.staticcall(
@@ -34,8 +39,26 @@ contract PolicyRegistry {
         _;
     }
 
-    constructor(address _agentRegistry) {
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
+
+    function initialize(address _agentRegistry) public initializer {
+        require(_agentRegistry != address(0), "Zero address");
+        __Ownable_init(msg.sender);
+        // UUPSUpgradeable is stateless in OZ v5 — no init needed
         agentRegistry = _agentRegistry;
+        nextPolicyId = 1;
+    }
+
+    function _authorizeUpgrade(address newImplementation) internal override onlyOwner {}
+
+    function setAgentRegistry(address _agentRegistry) external onlyOwner {
+        require(_agentRegistry != address(0), "Zero address");
+        address old = agentRegistry;
+        agentRegistry = _agentRegistry;
+        emit AgentRegistryUpdated(old, _agentRegistry);
     }
 
     function registerPolicy(

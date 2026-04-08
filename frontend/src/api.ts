@@ -1,26 +1,32 @@
 import axios from "axios";
+import type {
+  Agent, DashboardStats, RunListItem, Run, ClaimListItem, ClaimResult,
+  Score, ScoreHistoryPoint, Policy, Memory, ReplayResult,
+  RegisterAgentResult, PolicyRegisterResult, StakeResult, RunExecuteResult,
+  SSEEventData,
+} from "./types";
 
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || "/api",
 });
 
-export async function fetchDashboardStats() {
-  const { data } = await api.get("/dashboard/stats");
+export async function fetchDashboardStats(): Promise<DashboardStats> {
+  const { data } = await api.get<DashboardStats>("/dashboard/stats");
   return data;
 }
 
 // legacy alias
-export async function fetchStats() {
+export async function fetchStats(): Promise<DashboardStats> {
   return fetchDashboardStats();
 }
 
-export async function fetchAgents() {
-  const { data } = await api.get("/agents");
+export async function fetchAgents(): Promise<Agent[]> {
+  const { data } = await api.get<Agent[]>("/agents");
   return data;
 }
 
-export async function fetchAgent(id: number) {
-  const { data } = await api.get(`/agents/${id}`);
+export async function fetchAgent(id: number): Promise<Agent> {
+  const { data } = await api.get<Agent>(`/agents/${id}`);
   return data;
 }
 
@@ -28,8 +34,8 @@ export async function registerAgent(
   walletAddress: string,
   metadataUri: string,
   extras?: { signature?: string; message?: string; chain_agent_id?: string; chain_tx?: string }
-) {
-  const { data } = await api.post("/agents", {
+): Promise<RegisterAgentResult> {
+  const { data } = await api.post<RegisterAgentResult>("/agents", {
     wallet_address: walletAddress,
     metadata_uri: metadataUri,
     ...extras,
@@ -39,18 +45,18 @@ export async function registerAgent(
 
 export async function generateApiKey(walletAddress: string, signature?: string, message?: string) {
   const body = signature && message ? { signature, message } : {};
-  const { data } = await api.post(`/operators/${walletAddress}/api-key`, body);
-  return data as { operator_id: number; wallet_address: string; api_key: string };
-}
-
-export async function fetchRuns(agentId?: number) {
-  const params = agentId ? { agent_id: agentId } : {};
-  const { data } = await api.get("/runs", { params });
+  const { data } = await api.post<{ operator_id: number; wallet_address: string; api_key: string }>(`/operators/${walletAddress}/api-key`, body);
   return data;
 }
 
-export async function fetchRun(runId: string) {
-  const { data } = await api.get(`/runs/${runId}`);
+export async function fetchRuns(agentId?: number): Promise<RunListItem[]> {
+  const params = agentId ? { agent_id: agentId } : {};
+  const { data } = await api.get<RunListItem[]>("/runs", { params });
+  return data;
+}
+
+export async function fetchRun(runId: string): Promise<Run> {
+  const { data } = await api.get<Run>(`/runs/${runId}`);
   return data;
 }
 
@@ -61,9 +67,9 @@ export async function executeRun(
   apiKey?: string,
   signature?: string,
   message?: string,
-) {
+): Promise<RunExecuteResult> {
   const headers = apiKey ? { "X-API-Key": apiKey } : undefined;
-  const { data } = await api.post("/runs", {
+  const { data } = await api.post<RunExecuteResult>("/runs", {
     agent_id: agentId,
     user_input: userInput,
     ...(userAddress ? { user_address: userAddress } : {}),
@@ -72,14 +78,14 @@ export async function executeRun(
   return data;
 }
 
-export async function replayRun(runId: string) {
-  const { data } = await api.get(`/runs/${runId}/replay`);
+export async function replayRun(runId: string): Promise<ReplayResult> {
+  const { data } = await api.get<ReplayResult>(`/runs/${runId}/replay`);
   return data;
 }
 
-export async function fetchClaims(agentId?: number) {
+export async function fetchClaims(agentId?: number): Promise<ClaimListItem[]> {
   const params = agentId ? { agent_id: agentId } : {};
-  const { data } = await api.get("/claims", { params });
+  const { data } = await api.get<ClaimListItem[]>("/claims", { params });
   return data;
 }
 
@@ -88,8 +94,8 @@ export async function submitClaim(
   agentId: number,
   claimantAddress: string,
   reasonCode: string
-) {
-  const { data } = await api.post("/claims", {
+): Promise<ClaimResult> {
+  const { data } = await api.post<ClaimResult>("/claims", {
     run_id: runId,
     agent_id: agentId,
     claimant_address: claimantAddress,
@@ -98,19 +104,19 @@ export async function submitClaim(
   return data;
 }
 
-export async function fetchScore(agentId: number) {
-  const { data } = await api.get(`/scores/${agentId}`);
+export async function fetchScore(agentId: number): Promise<Score> {
+  const { data } = await api.get<Score>(`/scores/${agentId}`);
   return data;
 }
 
-export async function fetchAllScores() {
-  const { data } = await api.get("/scores");
+export async function fetchAllScores(): Promise<Score[]> {
+  const { data } = await api.get<Score[]>("/scores");
   return data;
 }
 
-export async function fetchPolicies(agentId?: number) {
+export async function fetchPolicies(agentId?: number): Promise<Policy[]> {
   const params = agentId ? { agent_id: agentId } : {};
-  const { data } = await api.get("/policies", { params });
+  const { data } = await api.get<Policy[]>("/policies", { params });
   return data;
 }
 
@@ -119,16 +125,16 @@ export async function registerPolicy(
   rules: object,
   extras?: { chain_policy_id?: string; chain_tx?: string },
   apiKey?: string
-) {
+): Promise<PolicyRegisterResult> {
   const body = { agent_id: agentId, rules, ...extras };
   const { data } = apiKey
-    ? await api.post("/policies", body, { headers: { "X-API-Key": apiKey } })
-    : await api.post("/policies", body);
+    ? await api.post<PolicyRegisterResult>("/policies", body, { headers: { "X-API-Key": apiKey } })
+    : await api.post<PolicyRegisterResult>("/policies", body);
   return data;
 }
 
-export async function activatePolicy(policyId: number) {
-  const { data } = await api.post(`/policies/${policyId}/activate`);
+export async function activatePolicy(policyId: number): Promise<Policy> {
+  const { data } = await api.post<Policy>(`/policies/${policyId}/activate`);
   return data;
 }
 
@@ -137,30 +143,30 @@ export async function stakeCollateral(
   amountWei: string,
   txHash?: string,
   apiKey?: string
-) {
+): Promise<StakeResult> {
   const body = { amount_wei: amountWei, ...(txHash ? { tx_hash: txHash } : {}) };
   const { data } = apiKey
-    ? await api.post(`/agents/${agentId}/stake`, body, { headers: { "X-API-Key": apiKey } })
-    : await api.post(`/agents/${agentId}/stake`, body);
+    ? await api.post<StakeResult>(`/agents/${agentId}/stake`, body, { headers: { "X-API-Key": apiKey } })
+    : await api.post<StakeResult>(`/agents/${agentId}/stake`, body);
   return data;
 }
 
-export async function unstakeCollateral(agentId: number, amountWei: string) {
-  const { data } = await api.post(`/agents/${agentId}/unstake`, {
+export async function unstakeCollateral(agentId: number, amountWei: string): Promise<StakeResult> {
+  const { data } = await api.post<StakeResult>(`/agents/${agentId}/unstake`, {
     amount_wei: amountWei,
   });
   return data;
 }
 
-export async function fetchAgentMemories(agentId: number, limit = 20) {
-  const { data } = await api.get(`/agents/${agentId}/memories`, { params: { limit } });
+export async function fetchAgentMemories(agentId: number, limit = 20): Promise<Memory[]> {
+  const { data } = await api.get<Memory[]>(`/agents/${agentId}/memories`, { params: { limit } });
   return data;
 }
 
 export function streamRun(
   agentId: number,
   userInput: string,
-  onEvent: (event: string, data: any) => void,
+  onEvent: (event: string, data: SSEEventData) => void,
   onDone: () => void,
   onError: (err: string) => void,
 ): () => void {
@@ -203,7 +209,7 @@ export function streamRun(
 
 export default api;
 
-export async function fetchScoreHistory(agentId: number) {
-  const { data } = await api.get(`/scores/${agentId}/history`);
+export async function fetchScoreHistory(agentId: number): Promise<ScoreHistoryPoint[]> {
+  const { data } = await api.get<ScoreHistoryPoint[]>(`/scores/${agentId}/history`);
   return data;
 }

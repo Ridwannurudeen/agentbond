@@ -42,9 +42,16 @@ class TestOGExecutionClient:
     async def test_mock_proof_verification(self):
         client = OGExecutionClient(private_key="test_key")
         proof = await client.verify_proof("run123", "0xtx123")
-        assert proof.valid is True
-        assert proof.input_hash_match is True
-        assert proof.output_hash_match is True
+        # Mock mode cannot verify — no real OG SDK connection
+        assert proof.valid is False
+        assert proof.input_hash_match is False
+        assert proof.output_hash_match is False
+
+    @pytest.mark.asyncio
+    async def test_mock_runs_not_verified(self):
+        client = OGExecutionClient(private_key="test_key")
+        result = await client.execute_agent_run("model", "test")
+        assert result.verified is False
 
     @pytest.mark.asyncio
     async def test_input_hash_deterministic(self):

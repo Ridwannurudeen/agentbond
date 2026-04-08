@@ -5,8 +5,9 @@ import { getAgentRegistry, getWarrantyPool, getPolicyRegistry } from "../contrac
 import { sha256, toUtf8Bytes } from "ethers";
 import { Bot, ShieldCheck, Coins, Play, CheckCircle2, XCircle } from "lucide-react";
 import { motion } from "framer-motion";
+import type { OperationResult } from "../types";
 
-function ResultBox({ result }: { result: any }) {
+function ResultBox({ result }: { result: OperationResult | null }) {
   if (!result) return null;
   const isError = !!result.error;
   return (
@@ -67,7 +68,7 @@ export default function Operator() {
   const { address, signer } = useWallet();
 
   const [metadataUri, setMetadataUri] = useState("");
-  const [agentResult, setAgentResult] = useState<any>(null);
+  const [agentResult, setAgentResult] = useState<OperationResult | null>(null);
   const [agentLoading, setAgentLoading] = useState(false);
 
   // API key — persisted in localStorage per wallet so page refreshes don't lose it
@@ -92,17 +93,17 @@ export default function Operator() {
   const [policyRules, setPolicyRules] = useState(
     JSON.stringify({ allowed_tools: ["get_price", "get_portfolio"], max_value_per_action: 1000, prohibited_targets: [], max_actions_per_window: 100, window_seconds: 3600 }, null, 2)
   );
-  const [policyResult, setPolicyResult] = useState<any>(null);
+  const [policyResult, setPolicyResult] = useState<OperationResult | null>(null);
   const [policyLoading, setPolicyLoading] = useState(false);
 
   const [stakeAgentId, setStakeAgentId] = useState("");
   const [stakeAmount, setStakeAmount] = useState("");
-  const [stakeResult, setStakeResult] = useState<any>(null);
+  const [stakeResult, setStakeResult] = useState<OperationResult | null>(null);
   const [stakeLoading, setStakeLoading] = useState(false);
 
   const [runAgentId, setRunAgentId] = useState("");
   const [userInput, setUserInput] = useState("");
-  const [runResult, setRunResult] = useState<any>(null);
+  const [runResult, setRunResult] = useState<OperationResult | null>(null);
 
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -157,8 +158,9 @@ export default function Operator() {
       } catch {
         setAgentResult({ ...result, chain_tx: receipt.hash });
       }
-    } catch (err: any) {
-      setAgentResult({ error: `[${step}] ${err.response?.data?.detail || err.message || String(err)}` });
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { detail?: string } }; message?: string };
+      setAgentResult({ error: `[${step}] ${e.response?.data?.detail || e.message || String(err)}` });
     } finally {
       setAgentLoading(false);
     }
@@ -230,8 +232,9 @@ export default function Operator() {
         key
       );
       setPolicyResult({ ...result, chain_tx: receipt.hash });
-    } catch (err: any) {
-      setPolicyResult({ error: err.response?.data?.detail || err.message || String(err) });
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { detail?: string } }; message?: string };
+      setPolicyResult({ error: e.response?.data?.detail || e.message || String(err) });
     } finally {
       setPolicyLoading(false);
     }
@@ -269,8 +272,9 @@ export default function Operator() {
       const key = await ensureApiKey();
       const result = await stakeCollateral(agentDbId, stakeAmount, receipt.hash, key);
       setStakeResult({ ...result, chain_tx: receipt.hash });
-    } catch (err: any) {
-      setStakeResult({ error: err.response?.data?.detail || err.message || String(err) });
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { detail?: string } }; message?: string };
+      setStakeResult({ error: e.response?.data?.detail || e.message || String(err) });
     } finally {
       setStakeLoading(false);
     }
@@ -293,9 +297,11 @@ export default function Operator() {
       const signature = await signer.signMessage(message);
 
       const key = await ensureApiKey();
-      setRunResult(await executeRun(parseInt(runAgentId), userInput, address ?? undefined, key, signature, message));
-    } catch (err: any) {
-      setRunResult({ error: err.response?.data?.detail || err.message || String(err) });
+      const res = await executeRun(parseInt(runAgentId), userInput, address ?? undefined, key, signature, message);
+      setRunResult({ ...res });
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { detail?: string } }; message?: string };
+      setRunResult({ error: e.response?.data?.detail || e.message || String(err) });
     } finally {
       setRunLoading(false);
     }
@@ -308,7 +314,7 @@ export default function Operator() {
         <p className="text-sm text-zinc-600 mt-0.5">Register agents, configure policies, and execute runs</p>
       </div>
 
-      <div className="grid grid-cols-2 gap-5">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
         {/* Register Agent */}
         <Section icon={Bot} title="Register Agent" delay={0}>
           <form onSubmit={handleRegister} className="space-y-4">

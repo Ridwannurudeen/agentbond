@@ -1,8 +1,9 @@
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { fetchAgents } from "../api";
 import { Trophy, TrendingUp, Activity, ShieldAlert } from "lucide-react";
 import { motion } from "framer-motion";
+import type { Agent } from "../types";
 
 function Identicon({ id, size = 32 }: { id: number; size?: number }) {
   const hue = (id * 137.508) % 360;
@@ -53,7 +54,7 @@ const MEDAL: Record<number, { icon: string; cls: string }> = {
 };
 
 export default function Leaderboard() {
-  const [agents, setAgents] = useState<any[]>([]);
+  const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
   const [sortBy, setSortBy] = useState<"score" | "runs" | "violations">("score");
 
@@ -69,7 +70,6 @@ export default function Leaderboard() {
     return b.violations - a.violations;
   });
 
-  const topScore = sorted[0]?.trust_score ?? 100;
   const totalRuns = agents.reduce((s, a) => s + a.total_runs, 0);
   const cleanAgents = agents.filter((a) => a.violations === 0 && a.total_runs > 0).length;
   const avgScore = agents.length
@@ -90,7 +90,7 @@ export default function Leaderboard() {
       </div>
 
       {/* Summary stats */}
-      <div className="grid grid-cols-4 gap-4 mb-8">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
         {[
           { label: "Agents", value: agents.length, icon: Trophy, color: "text-zinc-100" },
           { label: "Avg Score", value: avgScore, icon: TrendingUp, color: avgScore >= 80 ? "text-emerald-400" : avgScore >= 60 ? "text-amber-400" : "text-red-400" },
@@ -125,7 +125,7 @@ export default function Leaderboard() {
       </div>
 
       {/* Leaderboard table */}
-      <div className="glass-card overflow-hidden">
+      <div className="glass-card overflow-hidden overflow-x-auto">
         {sorted.length === 0 ? (
           <div className="py-16 text-center text-zinc-600 text-sm">
             No agents yet. <Link to="/operator" className="text-violet-400 no-underline hover:underline">Register one →</Link>

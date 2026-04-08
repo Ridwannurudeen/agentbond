@@ -16,7 +16,7 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.add_column('runs', sa.Column('verified', sa.Boolean(), nullable=False, server_default=sa.text('0')))
+    op.add_column('runs', sa.Column('verified', sa.Boolean(), nullable=False, server_default=sa.text('false')))
 
 
 def downgrade() -> None:

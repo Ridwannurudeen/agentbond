@@ -2,7 +2,7 @@ import enum
 from datetime import datetime
 
 from sqlalchemy import (
-    Column, Integer, String, DateTime, Text, Numeric, Enum, ForeignKey, JSON, Boolean
+    Column, Integer, String, DateTime, Text, Numeric, Enum, ForeignKey, JSON, Boolean, func
 )
 from sqlalchemy.orm import relationship
 
@@ -53,6 +53,7 @@ class Agent(Base):
     total_runs = Column(Integer, default=0)
     violations = Column(Integer, default=0)
     created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     operator = relationship("Operator", back_populates="agents")
     versions = relationship("AgentVersion", back_populates="agent")
@@ -92,15 +93,17 @@ class Run(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     run_id = Column(String(66), unique=True, nullable=False)
-    agent_id = Column(Integer, ForeignKey("agents.id"), nullable=False)
+    agent_id = Column(Integer, ForeignKey("agents.id"), nullable=False, index=True)
     user_address = Column(String(42), nullable=True)
     input_hash = Column(String(66), nullable=True)
     output_hash = Column(String(66), nullable=True)
     transcript_json = Column(JSON, nullable=True)
     settlement_tx = Column(String(66), nullable=True)
+    verified = Column(Boolean, nullable=False, default=False)  # True only for real TEE-attested runs
     policy_verdict = Column(String(10), nullable=True)  # "pass" or "fail"
     reason_codes = Column(JSON, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     agent = relationship("Agent", back_populates="runs")
     claims = relationship("Claim", back_populates="run")
@@ -112,14 +115,15 @@ class Claim(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     chain_claim_id = Column(Integer, unique=True, nullable=True)
     run_id = Column(Integer, ForeignKey("runs.id"), nullable=False)
-    agent_id = Column(Integer, ForeignKey("agents.id"), nullable=False)
-    claimant_address = Column(String(42), nullable=False)
+    agent_id = Column(Integer, ForeignKey("agents.id"), nullable=False, index=True)
+    claimant_address = Column(String(42), nullable=False, index=True)
     reason_code = Column(String(64), nullable=False)
     evidence_hash = Column(String(66), nullable=False)
     status = Column(Enum(ClaimStatus), default=ClaimStatus.submitted)
     payout_amount = Column(Numeric(precision=36, scale=18), nullable=True)
     resolved_at = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     run = relationship("Run", back_populates="claims")
     agent = relationship("Agent", back_populates="claims")
@@ -140,7 +144,7 @@ class ReputationSnapshot(Base):
     __tablename__ = "reputation_snapshots"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    agent_id = Column(Integer, ForeignKey("agents.id"), nullable=False)
+    agent_id = Column(Integer, ForeignKey("agents.id"), nullable=False, index=True)
     score = Column(Integer, nullable=False)
     total_runs = Column(Integer, nullable=False)
     violations = Column(Integer, nullable=False)

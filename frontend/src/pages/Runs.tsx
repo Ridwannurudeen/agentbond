@@ -3,11 +3,12 @@ import { Link } from "react-router-dom";
 import { fetchRuns } from "../api";
 import { Filter } from "lucide-react";
 import { motion } from "framer-motion";
+import type { RunListItem } from "../types";
 
 type VerdictFilter = "all" | "pass" | "fail";
 
 export default function Runs() {
-  const [runs, setRuns] = useState<any[]>([]);
+  const [runs, setRuns] = useState<RunListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [verdict, setVerdict] = useState<VerdictFilter>("all");
@@ -22,8 +23,9 @@ export default function Runs() {
       const agentId = agentFilter ? parseInt(agentFilter) : undefined;
       const data = await fetchRuns(agentId);
       setRuns(data);
-    } catch (err: any) {
-      setError(err.response?.data?.detail || err.message || "Failed to load runs");
+    } catch (err: unknown) {
+      const _err = err as { response?: { data?: { detail?: string } }; message?: string };
+      setError(_err.response?.data?.detail || _err.message || "Failed to load runs");
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -54,7 +56,7 @@ export default function Runs() {
       </div>
 
       {/* Filter bar */}
-      <div className="glass-card p-4 mb-4 flex items-center gap-4 flex-wrap">
+      <div className="glass-card p-4 mb-4 flex flex-col sm:flex-row items-start sm:items-center gap-4 flex-wrap">
         <form onSubmit={handleFilter} className="flex items-end gap-3">
           <div>
             <label className="form-label flex items-center gap-1.5">
@@ -73,7 +75,7 @@ export default function Runs() {
         </form>
 
         {/* Verdict toggle */}
-        <div className="ml-auto flex items-center gap-1 bg-zinc-900 rounded-lg p-1 border border-zinc-800">
+        <div className="sm:ml-auto flex items-center gap-1 bg-zinc-900 rounded-lg p-1 border border-zinc-800">
           {(["all", "pass", "fail"] as VerdictFilter[]).map((v) => (
             <button
               key={v}
@@ -116,7 +118,7 @@ export default function Runs() {
               No runs match the current filter.
             </div>
           ) : (
-            <table className="data-table">
+            <div className="overflow-x-auto"><table className="data-table">
               <thead>
                 <tr>
                   <th>Run ID</th>
@@ -128,7 +130,7 @@ export default function Runs() {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((r: any) => (
+                {filtered.map((r) => (
                   <tr key={r.run_id}>
                     <td>
                       <Link to={`/runs/${r.run_id}`} className="font-mono text-xs text-violet-400">
@@ -163,7 +165,7 @@ export default function Runs() {
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </table></div>
           )}
         </motion.div>
       )}

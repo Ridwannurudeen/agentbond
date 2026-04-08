@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 
-contract AgentRegistry is Ownable {
+contract AgentRegistry is Initializable, OwnableUpgradeable, UUPSUpgradeable {
     enum Status { Active, Paused, Retired }
 
     struct AgentInfo {
@@ -23,17 +25,21 @@ contract AgentRegistry is Ownable {
         uint256 timestamp;
     }
 
-    uint256 public nextAgentId = 1;
+    uint256 public nextAgentId;
     mapping(uint256 => AgentInfo) public agents;
     mapping(uint256 => mapping(uint256 => Version)) public versions;
     mapping(uint256 => uint256) public nextVersionId;
+    mapping(uint256 => bool) public pausedByResolver;
 
     address public resolver;
+    address public warrantyPool;
 
     event AgentRegistered(uint256 indexed agentId, address indexed operator);
     event VersionPublished(uint256 indexed agentId, uint256 indexed versionId);
     event ScoreUpdated(uint256 indexed agentId, uint256 newScore);
     event StatusChanged(uint256 indexed agentId, Status status);
+    event ResolverUpdated(address indexed oldResolver, address indexed newResolver);
+    event WarrantyPoolUpdated(address indexed oldPool, address indexed newPool);
 
     modifier onlyOperator(uint256 agentId) {
         require(agents[agentId].operator == msg.sender, "Not operator");
@@ -45,12 +51,33 @@ contract AgentRegistry is Ownable {
         _;
     }
 
-    constructor(address _resolver) Ownable(msg.sender) {
-        resolver = _resolver;
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
     }
 
-    function setResolver(address _resolver) external onlyOwner {
+    function initialize(address _resolver) public initializer {
+        require(_resolver != address(0), "Zero address");
+        __Ownable_init(msg.sender);
+        // UUPSUpgradeable is stateless in OZ v5 — no init needed
         resolver = _resolver;
+        nextAgentId = 1;
+    }
+
+    function _authorizeUpgrade(address newImplementation) internal override onlyOwner {}
+
+    function setResolver(address _resolver) external onlyOwner {
+        require(_resolver != address(0), "Zero address");
+        address old = resolver;
+        resolver = _resolver;
+        emit ResolverUpdated(old, _resolver);
+    }
+
+    function setWarrantyPool(address _warrantyPool) external onlyOwner {
+        require(_warrantyPool != address(0), "Zero address");
+        address old = warrantyPool;
+        warrantyPool = _warrantyPool;
+        emit WarrantyPoolUpdated(old, _warrantyPool);
     }
 
     function registerAgent(string calldata metadataURI) external returns (uint256) {
@@ -86,17 +113,31 @@ contract AgentRegistry is Ownable {
     }
 
     function setStatus(uint256 agentId, Status status) external onlyOperator(agentId) {
+        if (agents[agentId].status == Status.Paused && status == Status.Active) {
+            require(!pausedByResolver[agentId], "Only resolver can unpause");
+        }
         agents[agentId].status = status;
         emit StatusChanged(agentId, status);
     }
 
     function pauseAgent(uint256 agentId) external {
         require(
-            msg.sender == resolver || msg.sender == agents[agentId].operator,
+            msg.sender == resolver
+            || msg.sender == warrantyPool
+            || msg.sender == agents[agentId].operator,
             "Not authorized"
         );
         agents[agentId].status = Status.Paused;
+        if (msg.sender == resolver || msg.sender == warrantyPool) {
+            pausedByResolver[agentId] = true;
+        }
         emit StatusChanged(agentId, Status.Paused);
+    }
+
+    function unpauseAgent(uint256 agentId) external onlyResolver {
+        agents[agentId].status = Status.Active;
+        pausedByResolver[agentId] = false;
+        emit StatusChanged(agentId, Status.Active);
     }
 
     function updateScore(

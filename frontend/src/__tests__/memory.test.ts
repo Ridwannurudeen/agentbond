@@ -2,7 +2,6 @@
  * Tests for fetchAgentMemories and streamRun in api.ts
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import axios from "axios";
 
 vi.mock("axios", () => {
   const instance = { get: vi.fn(), post: vi.fn() };
@@ -103,7 +102,7 @@ describe("streamRun", () => {
     ];
     mockFetch(events);
 
-    const received: { event: string; data: any }[] = [];
+    const received: { event: string; data: Record<string, unknown> }[] = [];
     await new Promise<void>((resolve) => {
       streamRun(1, "test", (ev, data) => received.push({ event: ev, data }), resolve, () => resolve());
     });

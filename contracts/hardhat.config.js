@@ -1,8 +1,12 @@
 require("@nomicfoundation/hardhat-toolbox");
+require("@openzeppelin/hardhat-upgrades");
 require("dotenv").config({ path: "../.env" });
 
 /** @type import('hardhat/config').HardhatUserConfig */
 module.exports = {
+  mocha: {
+    timeout: 120000,
+  },
   paths: {
     sources: "./src",
     tests: "./test",

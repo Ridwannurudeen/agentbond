@@ -10,6 +10,7 @@ import {
   ExternalLink, Brain, History,
 } from "lucide-react";
 import { motion } from "framer-motion";
+import type { Agent, RunListItem, ClaimListItem, Score, ScoreHistoryPoint, Policy, Memory, PolicyRules, SSEEvent, SSEEventData } from "../types";
 
 // ── Identicon ────────────────────────────────────────────────────────────────
 function Identicon({ id, size = 48 }: { id: number; size?: number }) {
@@ -52,7 +53,7 @@ function ScoreRing({ score }: { score: number }) {
 }
 
 // ── Score history chart ───────────────────────────────────────────────────────
-function ScoreHistoryChart({ history, currentScore }: { history: any[]; currentScore: number }) {
+function ScoreHistoryChart({ history, currentScore }: { history: ScoreHistoryPoint[]; currentScore: number }) {
   if (history.length === 0) {
     return (
       <div className="flex items-center justify-center h-20 text-zinc-700 text-xs">
@@ -62,7 +63,7 @@ function ScoreHistoryChart({ history, currentScore }: { history: any[]; currentS
   }
 
   const W = 400, H = 72;
-  const scores = history.map((p: any) => p.score);
+  const scores = history.map((p) => p.score);
   const minS = Math.max(0, Math.min(...scores) - 5);
   const maxS = Math.min(100, Math.max(...scores) + 5);
   const range = maxS - minS || 1;
@@ -72,7 +73,7 @@ function ScoreHistoryChart({ history, currentScore }: { history: any[]; currentS
 
   const pathD = history.length === 1
     ? ""
-    : "M " + history.map((p: any, i: number) => `${toX(i)},${toY(p.score)}`).join(" L ");
+    : "M " + history.map((p, i) => `${toX(i)},${toY(p.score)}`).join(" L ");
 
   const areaD = history.length > 1
     ? `${pathD} L ${toX(history.length - 1)},${H} L ${toX(0)},${H} Z`
@@ -91,7 +92,7 @@ function ScoreHistoryChart({ history, currentScore }: { history: any[]; currentS
         </defs>
         {areaD && <path d={areaD} fill="url(#scoreAreaGrad)" />}
         {pathD && <path d={pathD} fill="none" stroke={lineColor} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />}
-        {history.map((p: any, i: number) => (
+        {history.map((p, i) => (
           <circle key={i} cx={toX(i)} cy={toY(p.score)} r={3} fill={lineColor} />
         ))}
       </svg>
@@ -110,7 +111,7 @@ function ScoreHistoryChart({ history, currentScore }: { history: any[]; currentS
 }
 
 // ── Policy rules chips ────────────────────────────────────────────────────────
-function PolicyRulesChips({ rules }: { rules: any }) {
+function PolicyRulesChips({ rules }: { rules: PolicyRules }) {
   if (!rules || typeof rules !== "object") return null;
   const chips: { label: string; cls: string }[] = [];
 
@@ -153,21 +154,21 @@ export default function AgentDetail() {
   const { id } = useParams<{ id: string }>();
   const runFormRef = useRef<HTMLDivElement>(null);
 
-  const [agent, setAgent] = useState<any>(null);
-  const [runs, setRuns] = useState<any[]>([]);
-  const [claims, setClaims] = useState<any[]>([]);
-  const [score, setScore] = useState<any>(null);
-  const [scoreHistory, setScoreHistory] = useState<any[]>([]);
-  const [policies, setPolicies] = useState<any[]>([]);
-  const [memories, setMemories] = useState<any[]>([]);
+  const [agent, setAgent] = useState<Agent | null>(null);
+  const [runs, setRuns] = useState<RunListItem[]>([]);
+  const [claims, setClaims] = useState<ClaimListItem[]>([]);
+  const [score, setScore] = useState<Score | null>(null);
+  const [scoreHistory, setScoreHistory] = useState<ScoreHistoryPoint[]>([]);
+  const [policies, setPolicies] = useState<Policy[]>([]);
+  const [memories, setMemories] = useState<Memory[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const [userInput, setUserInput] = useState("");
   const [running, setRunning] = useState(false);
-  const [runResult, setRunResult] = useState<any>(null);
+  const [runResult, setRunResult] = useState<SSEEventData | null>(null);
   const [runError, setRunError] = useState<string | null>(null);
-  const [streamEvents, setStreamEvents] = useState<{ event: string; data: any }[]>([]);
+  const [streamEvents, setStreamEvents] = useState<SSEEvent[]>([]);
 
   useEffect(() => {
     if (!id) return;
@@ -214,7 +215,7 @@ export default function AgentDetail() {
     try {
       await activatePolicy(policyId);
       setPolicies(await fetchPolicies(parseInt(id!)));
-    } catch (err: any) { alert(err.response?.data?.detail || err.message); }
+    } catch (err: unknown) { const e = err as { response?: { data?: { detail?: string } }; message?: string }; alert(e.response?.data?.detail || e.message); }
   };
 
   if (loading) return <div className="flex items-center justify-center pt-20 text-zinc-600 text-sm">Loading...</div>;
@@ -231,7 +232,7 @@ export default function AgentDetail() {
       </Link>
 
       {/* Agent hero */}
-      <motion.div className="glass-card p-6 mb-5 flex items-center justify-between" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
+      <motion.div className="glass-card p-6 mb-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
         <div className="flex items-center gap-5">
           <Identicon id={agent.id} size={52} />
           <div>
@@ -253,7 +254,7 @@ export default function AgentDetail() {
       </motion.div>
 
       {/* Stat grid */}
-      <div className="grid grid-cols-4 gap-4 mb-5">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-5">
         {[
           { label: "Total Runs", value: agent.total_runs, icon: Activity, color: "text-zinc-100" },
           { label: "Violations", value: agent.violations, icon: FileWarning, color: agent.violations > 0 ? "text-red-400" : "text-emerald-400" },
@@ -271,11 +272,11 @@ export default function AgentDetail() {
       </div>
 
       {/* Score breakdown + history */}
-      <div className="grid grid-cols-2 gap-4 mb-5">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-5">
         {score?.breakdown && (
           <div className="glass-card p-5">
             <h3 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-4">Score Breakdown</h3>
-            <div className="flex gap-8">
+            <div className="flex flex-wrap gap-4 sm:gap-8">
               {[
                 { label: "Base", value: `${score.breakdown.base}`, positive: true },
                 { label: "Violation", value: `-${score.breakdown.violation_penalty}`, positive: score.breakdown.violation_penalty === 0 },
@@ -306,7 +307,7 @@ export default function AgentDetail() {
           <Play size={14} className="text-violet-400" />
           <h3 className="text-sm font-semibold text-zinc-100">Execute Run</h3>
         </div>
-        <form onSubmit={handleRun} className="flex gap-3 items-end">
+        <form onSubmit={handleRun} className="flex flex-col sm:flex-row gap-3 sm:items-end">
           <div className="flex-1">
             <label className="form-label">User Input</label>
             <textarea className="form-input" value={userInput} onChange={(e) => setUserInput(e.target.value)}
@@ -354,9 +355,9 @@ export default function AgentDetail() {
         {runError && (
           <div className="mt-3 p-3 rounded-lg bg-red-950/30 border border-red-900/50 text-red-400 text-xs">{runError}</div>
         )}
-        {runResult?.reason_codes?.length > 0 && (
+        {(runResult?.reason_codes?.length ?? 0) > 0 && (
           <div className="mt-2 flex gap-1.5 flex-wrap">
-            {runResult.reason_codes.map((code: string, i: number) => (
+            {runResult!.reason_codes!.map((code: string, i: number) => (
               <span key={i} className="badge-fail text-xs">{code}</span>
             ))}
           </div>
@@ -370,7 +371,7 @@ export default function AgentDetail() {
           <div className="py-8 text-center text-zinc-600 text-sm">No policies registered.</div>
         ) : (
           <div className="divide-y divide-zinc-800/60">
-            {policies.map((p: any) => (
+            {policies.map((p) => (
               <div key={p.id} className="px-4 py-3">
                 <div className="flex items-center gap-3">
                   <span className="font-mono text-xs text-zinc-600">#{p.id}</span>
@@ -402,7 +403,7 @@ export default function AgentDetail() {
         <h2 className="text-base font-semibold text-zinc-100">Runs</h2>
         <Link to="/runs" className="text-xs text-zinc-600 hover:text-violet-400 no-underline transition-colors">View all →</Link>
       </div>
-      <div className="glass-card overflow-hidden mb-5">
+      <div className="glass-card overflow-hidden overflow-x-auto mb-5">
         {runs.length === 0 ? (
           <div className="flex flex-col items-center py-10 gap-3">
             <Activity size={20} className="text-zinc-700" />
@@ -420,7 +421,7 @@ export default function AgentDetail() {
               <tr><th>Run ID</th><th>Verdict</th><th>Evidence Hash</th><th>Time</th></tr>
             </thead>
             <tbody>
-              {runs.slice(0, 20).map((r: any) => (
+              {runs.slice(0, 20).map((r) => (
                 <tr key={r.run_id}>
                   <td>
                     <div className="flex items-center gap-1.5">
@@ -454,7 +455,7 @@ export default function AgentDetail() {
         <h2 className="text-base font-semibold text-zinc-100">Claims</h2>
         <Link to="/claims" className="text-xs text-zinc-600 hover:text-violet-400 no-underline transition-colors">Submit claim →</Link>
       </div>
-      <div className="glass-card overflow-hidden mb-5">
+      <div className="glass-card overflow-hidden overflow-x-auto mb-5">
         {claims.length === 0 ? (
           <div className="py-8 text-center">
             <p className="text-zinc-600 text-sm">No claims filed.</p>
@@ -471,7 +472,7 @@ export default function AgentDetail() {
           <table className="data-table">
             <thead><tr><th>ID</th><th>Reason</th><th>Status</th><th>Created</th></tr></thead>
             <tbody>
-              {claims.map((c: any) => (
+              {claims.map((c) => (
                 <tr key={c.id}>
                   <td className="text-zinc-400 font-mono text-xs">#{c.id}</td>
                   <td><span className="font-mono text-[10px] text-zinc-500 bg-zinc-800/60 px-1.5 py-0.5 rounded">{c.reason_code}</span></td>
@@ -499,7 +500,7 @@ export default function AgentDetail() {
           <div className="py-8 text-center text-zinc-600 text-sm">No memory yet — run the agent to build history.</div>
         ) : (
           <div className="divide-y divide-zinc-800/60">
-            {memories.map((m: any) => (
+            {memories.map((m) => (
               <div key={m.id} className="px-4 py-3 flex items-start gap-3">
                 <span className={`mt-0.5 shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded uppercase tracking-wider ${
                   m.memory_type === "violation" ? "bg-red-950/60 text-red-400" :
@@ -508,9 +509,9 @@ export default function AgentDetail() {
                 }`}>{m.memory_type}</span>
                 <div className="flex-1 min-w-0">
                   <p className="text-xs text-zinc-300 leading-relaxed">{m.content}</p>
-                  {m.metadata?.reason_codes?.length > 0 && (
+                  {(m.metadata?.reason_codes?.length ?? 0) > 0 && (
                     <div className="flex gap-1.5 mt-1.5 flex-wrap">
-                      {m.metadata.reason_codes.map((code: string, i: number) => (
+                      {m.metadata!.reason_codes!.map((code: string, i: number) => (
                         <span key={i} className="font-mono text-[10px] text-zinc-500 bg-zinc-800/60 px-1.5 py-0.5 rounded">{code}</span>
                       ))}
                     </div>

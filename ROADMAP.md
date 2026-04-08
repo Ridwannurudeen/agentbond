@@ -1,58 +1,91 @@
 # AgentBond Product Roadmap
 
-Last updated: 2026-03-02
+Last updated: 2026-04-08
 
-## Product Goals
-- Deliver a usable operator and user workflow end to end.
-- Keep policy enforcement deterministic and explainable.
-- Make claims reliable, observable, and fast to resolve.
-- Reach production-ready deployment with clear operations.
+## Completed
 
-## Phase 1 - Usable MVP (0-4 Weeks)
-- One-command local startup for backend + frontend.
-- Guided onboarding flow for operator registration, policy setup, and staking.
-- End-to-end run flow from UI: create run, see verdict, submit claim.
-- Strong empty/loading/error states across dashboard pages.
-- Seed and demo scripts that produce realistic sample data.
+### Core Protocol (Shipped)
+- UUPS-upgradeable smart contracts on Base Sepolia (AgentRegistry, PolicyRegistry, WarrantyPool, ClaimManager, Heartbeat)
+- Full agent lifecycle: register → policy → stake → execute → claim → slash → reimburse
+- TEE-attested inference via OpenGradient SDK with x402 settlement on Base Sepolia
+- Deterministic policy engine with 6 rule types (tool whitelist, value cap, prohibited targets, frequency, data freshness, model mismatch)
+- Evidence hashing for independent run replay and verification
+- `verified` field on every run — explicitly marks whether execution was TEE-attested or mock
 
-## Phase 2 - Reliability and Trust (4-8 Weeks)
-- Public runs explorer with filters for agent, verdict, and claim status.
-- Two baseline deterministic policies:
-  - Tool whitelist policy.
-  - Value cap policy.
-- Claim lifecycle hardening: retries, idempotency, and clear failure reasons.
-- Webhook reliability: signed payload verification docs + delivery history UX.
-- Core metrics: run latency, verification latency, claim resolution time.
+### Security & Auth (Shipped)
+- SHA-256 hashed API keys (plaintext never stored)
+- Wallet signature auth on agent registration and claim submission (EIP-191)
+- Operator API key required for run execution (with agent ownership verification)
+- Per-operator rate limiting (30 rpm) + global IP rate limiting (120 rpm)
+- Daily claim circuit breaker (5 per claimant per day)
+- HMAC-SHA256 signed webhook payouts with exponential backoff retries
 
-## Phase 3 - Production Readiness (8-12 Weeks)
-- Deployment hardening: environment validation, backup strategy, and rollback plan.
-- Operational dashboards for API health, webhook failures, and queue backlogs.
-- Security pass: endpoint auth review, rate-limit tuning, and dependency updates.
-- Pilot rollout with 2-3 operators and structured feedback loop.
-- Mainnet readiness checklist and release criteria.
+### Smart Contract Security (Shipped)
+- Fixed unstake accounting (pendingUnstake tracked separately — collateral can't be drained during cooldown)
+- Resolver/pool-initiated pauses can't be overridden by operators
+- Heartbeat operator authentication (no liveness spoofing)
+- Zero-address checks, admin change events, agent existence validation on claims
+- UUPS upgradeability for all core contracts
 
-## Milestones (Deliverables + Acceptance Criteria)
+### Frontend & UX (Shipped)
+- React + TypeScript + Vite dashboard with Tailwind CSS v4
+- Live SSE streaming during run execution (memory → inference → policy → done)
+- Agent memory panel with run history
+- Score history charts
+- MetaMask wallet integration for on-chain flows
+- Operator console: register → policy → stake → execute
 
-**M1 - Usable Core Workflow**
-- Deliverable: onboarding + run + claim flow works from the frontend without manual DB edits.
-- Deliverable: demo script produces pass/fail runs and at least one claim.
-- Acceptance: fresh setup to first run in under 10 minutes on a clean machine.
-- Acceptance: at least 90% frontend route test pass for Dashboard, Runs, Claims, Operator flows.
+### Observability (Shipped)
+- Prometheus metrics (HTTP, runs, claims, webhooks, rate limits)
+- Structured JSON logging
+- Webhook delivery audit trail
+- Agent memory system (success/violation/context types)
 
-**M2 - Deterministic Policy Enforcement**
-- Deliverable: baseline policies are enforced consistently in API and UI.
-- Deliverable: violation reason codes are attached to runs and visible in run details.
-- Acceptance: deterministic policy tests pass for both pass and fail paths.
-- Acceptance: policy replay endpoint returns same verdict for same input.
+### Testing (Shipped)
+- 103 backend tests (unit, integration, e2e)
+- 45 Hardhat contract tests (including upgradeability)
+- 74 frontend tests
+- CI pipeline (GitHub Actions)
 
-**M3 - Reliable Claims and Webhooks**
-- Deliverable: claim submission, verification, and resolution are robust under retries.
-- Deliverable: webhook deliveries are signed, logged, and visible in operator history.
-- Acceptance: claim status transitions are valid and auditable for all cases.
-- Acceptance: webhook retry behavior is observable and documented.
+---
 
-**M4 - Production Rollout Readiness**
-- Deliverable: monitoring dashboards and operational runbook are complete.
-- Deliverable: pilot report with issues found, fixes shipped, and remaining risks.
-- Acceptance: deploy and rollback can be executed from documented steps.
-- Acceptance: all critical test suites pass in CI before release.
+## Phase 1 — Production Hardening (Current)
+- Pydantic response models on all API endpoints
+- TypeScript interfaces for all domain types (eliminate `any`)
+- Responsive design (mobile-friendly)
+- Multi-wallet support (wagmi + RainbowKit)
+- Database indexes on hot query paths
+- Alembic as sole schema source of truth
+- Domain + HTTPS for backend API
+
+## Phase 2 — Trust & Transparency
+- Resolver timelock + multisig documentation
+- Public landing page with product explainer
+- Reputation scoring unit tests and tuning
+- Failing-agent lifecycle E2E test
+- Variable claim amounts based on severity
+- Claim bond system (claimant deposits forfeit on rejection)
+
+## Phase 3 — Scale & Adoption
+- Multi-chain contract deployment
+- Mainnet readiness audit
+- Operator onboarding documentation
+- SDK for third-party integrations
+- Governance framework for resolver selection
+
+## Milestones
+
+**M1 — Production-Ready API** (Phase 1)
+- All endpoints have Pydantic response schemas
+- Frontend is responsive on mobile
+- Backend runs behind domain + HTTPS
+
+**M2 — Verifiable Trust** (Phase 2)
+- Resolver operates under timelock
+- Reputation formula is tested and documented
+- Landing page converts visitors to operators
+
+**M3 — Mainnet Launch** (Phase 3)
+- Security audit complete
+- Multi-chain deployment tested
+- 5+ operators onboarded in pilot

@@ -6,12 +6,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.db import get_db
 from backend.models.schema import Agent, Run, Claim, ClaimStatus, ReputationSnapshot
+from backend.schemas import ScoreResponse, ScoreHistoryItem, DashboardStats
 from backend.services.reputation import compute_score
 
 router = APIRouter(prefix="/api/scores", tags=["scores"])
 
 
-@router.get("/{agent_id}")
+@router.get("/{agent_id}", response_model=ScoreResponse)
 async def get_score(agent_id: int, db: AsyncSession = Depends(get_db)):
     """Get trust score breakdown for an agent."""
     try:
@@ -21,7 +22,7 @@ async def get_score(agent_id: int, db: AsyncSession = Depends(get_db)):
         raise HTTPException(404, str(e))
 
 
-@router.get("/{agent_id}/history")
+@router.get("/{agent_id}/history", response_model=list[ScoreHistoryItem])
 async def get_score_history(
     agent_id: int, limit: int = 20, db: AsyncSession = Depends(get_db)
 ):
@@ -47,7 +48,7 @@ async def get_score_history(
     ]
 
 
-@router.get("")
+@router.get("", response_model=DashboardStats)
 async def get_dashboard_stats(db: AsyncSession = Depends(get_db)):
     """Global dashboard statistics."""
     agents_count = (await db.execute(select(func.count(Agent.id)))).scalar() or 0

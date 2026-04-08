@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-
+import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 interface IAgentRegistry {
     function pauseAgent(uint256 agentId) external;
     function agents(uint256 agentId) external view returns (
@@ -13,11 +13,24 @@ interface IAgentRegistry {
     );
 }
 
-contract WarrantyPool is Ownable, ReentrancyGuard {
+contract WarrantyPool is Initializable, OwnableUpgradeable, UUPSUpgradeable {
+    // Manual reentrancy guard (upgrade-safe, no constructor)
+    uint256 private constant _NOT_ENTERED = 1;
+    uint256 private constant _ENTERED = 2;
+    uint256 private _reentrancyStatus;
+
+    modifier nonReentrant() {
+        require(_reentrancyStatus != _ENTERED, "ReentrancyGuard: reentrant call");
+        _reentrancyStatus = _ENTERED;
+        _;
+        _reentrancyStatus = _NOT_ENTERED;
+    }
+
     struct Stake {
         uint256 amount;
         uint256 lockedUntil;
-        uint256 reserved; // amount reserved for pending claims
+        uint256 reserved;
+        uint256 pendingUnstake;
     }
 
     struct UnstakeRequest {
@@ -29,11 +42,11 @@ contract WarrantyPool is Ownable, ReentrancyGuard {
     }
 
     uint256 public constant COOLDOWN_PERIOD = 7 days;
-    uint256 public constant MIN_COLLATERAL_RATIO_BPS = 15000; // 150% in basis points
+    uint256 public constant MIN_COLLATERAL_RATIO_BPS = 15000;
 
     mapping(uint256 => Stake) public stakes;
     mapping(uint256 => UnstakeRequest) public unstakeRequests;
-    uint256 public nextUnstakeId = 1;
+    uint256 public nextUnstakeId;
 
     IAgentRegistry public agentRegistry;
     address public claimManager;
@@ -43,18 +56,34 @@ contract WarrantyPool is Ownable, ReentrancyGuard {
     event UnstakeFinalized(uint256 indexed requestId);
     event SlashExecuted(uint256 indexed agentId, uint256 amount, uint256 indexed claimId);
     event PayoutSent(address indexed recipient, uint256 amount, uint256 indexed claimId);
+    event ClaimManagerUpdated(address indexed oldManager, address indexed newManager);
 
     modifier onlyClaimManager() {
         require(msg.sender == claimManager, "Not claim manager");
         _;
     }
 
-    constructor(address _agentRegistry) Ownable(msg.sender) {
-        agentRegistry = IAgentRegistry(_agentRegistry);
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
     }
 
+    function initialize(address _agentRegistry) public initializer {
+        require(_agentRegistry != address(0), "Zero address");
+        __Ownable_init(msg.sender);
+        // UUPSUpgradeable is stateless in OZ v5 — no init needed
+        _reentrancyStatus = _NOT_ENTERED;
+        agentRegistry = IAgentRegistry(_agentRegistry);
+        nextUnstakeId = 1;
+    }
+
+    function _authorizeUpgrade(address newImplementation) internal override onlyOwner {}
+
     function setClaimManager(address _claimManager) external onlyOwner {
+        require(_claimManager != address(0), "Zero address");
+        address old = claimManager;
         claimManager = _claimManager;
+        emit ClaimManagerUpdated(old, _claimManager);
     }
 
     function stake(uint256 agentId) external payable {
@@ -71,7 +100,7 @@ contract WarrantyPool is Ownable, ReentrancyGuard {
         require(operator == msg.sender, "Not agent operator");
 
         Stake storage s = stakes[agentId];
-        uint256 free = s.amount - s.reserved;
+        uint256 free = s.amount - s.reserved - s.pendingUnstake;
         require(amount <= free, "Insufficient free collateral");
 
         uint256 requestId = nextUnstakeId++;
@@ -83,7 +112,7 @@ contract WarrantyPool is Ownable, ReentrancyGuard {
             executed: false
         });
 
-        s.amount -= amount;
+        s.pendingUnstake += amount;
         emit UnstakeRequested(requestId, agentId, amount);
         return requestId;
     }
@@ -95,6 +124,10 @@ contract WarrantyPool is Ownable, ReentrancyGuard {
         require(!req.executed, "Already executed");
 
         req.executed = true;
+        Stake storage s = stakes[req.agentId];
+        s.amount -= req.amount;
+        s.pendingUnstake -= req.amount;
+
         (bool sent, ) = payable(msg.sender).call{value: req.amount}("");
         require(sent, "Transfer failed");
 
@@ -116,9 +149,8 @@ contract WarrantyPool is Ownable, ReentrancyGuard {
         }
         emit SlashExecuted(agentId, amount, claimId);
 
-        // Auto-pause if collateral too low
         if (s.amount == 0) {
-            agentRegistry.pauseAgent(agentId);
+            try agentRegistry.pauseAgent(agentId) {} catch {}
         }
     }
 
@@ -127,6 +159,7 @@ contract WarrantyPool is Ownable, ReentrancyGuard {
         uint256 amount,
         uint256 claimId
     ) external onlyClaimManager nonReentrant {
+        require(address(this).balance >= amount, "Insufficient pool balance");
         (bool sent, ) = payable(recipient).call{value: amount}("");
         require(sent, "Payout transfer failed");
         emit PayoutSent(recipient, amount, claimId);
@@ -134,7 +167,7 @@ contract WarrantyPool is Ownable, ReentrancyGuard {
 
     function reserveCollateral(uint256 agentId, uint256 amount) external onlyClaimManager {
         Stake storage s = stakes[agentId];
-        require(s.amount - s.reserved >= amount, "Insufficient free collateral");
+        require(s.amount - s.reserved - s.pendingUnstake >= amount, "Insufficient free collateral");
         s.reserved += amount;
     }
 
@@ -153,7 +186,7 @@ contract WarrantyPool is Ownable, ReentrancyGuard {
         Stake storage s = stakes[agentId];
         staked = s.amount;
         reserved = s.reserved;
-        free = staked - reserved;
+        free = staked > reserved + s.pendingUnstake ? staked - reserved - s.pendingUnstake : 0;
         ratioBps = reserved > 0 ? (staked * 10000) / reserved : type(uint256).max;
     }
 

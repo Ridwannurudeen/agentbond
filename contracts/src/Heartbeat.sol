@@ -1,11 +1,18 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
+interface IAgentRegistryHeartbeat {
+    function agents(uint256 agentId) external view returns (
+        address operator, string memory metadataURI, uint256 activeVersion,
+        uint8 status, uint256 trustScore, uint256 totalRuns, uint256 violations,
+        uint256 createdAt
+    );
+}
+
 /**
  * @title Heartbeat
- * @notice Simple on-chain liveness proof for agents.
- * Operators call `ping` to prove their agent is alive.
- * Anyone can query `lastPing` to check liveness.
+ * @notice On-chain liveness proof for agents.
+ * Only the agent's operator can ping to prove liveness.
  */
 contract Heartbeat {
     // agentId => last ping timestamp
@@ -16,9 +23,20 @@ contract Heartbeat {
 
     uint256 public constant LIVENESS_THRESHOLD = 1 hours;
 
+    IAgentRegistryHeartbeat public agentRegistry;
+
     event Ping(uint256 indexed agentId, address indexed operator, uint256 timestamp);
 
+    constructor(address _agentRegistry) {
+        require(_agentRegistry != address(0), "Zero address");
+        agentRegistry = IAgentRegistryHeartbeat(_agentRegistry);
+    }
+
     function ping(uint256 agentId) external {
+        (address operator, , , , , , , ) = agentRegistry.agents(agentId);
+        require(operator != address(0), "Agent does not exist");
+        require(operator == msg.sender, "Not agent operator");
+
         lastPing[agentId] = block.timestamp;
         lastPinger[agentId] = msg.sender;
         emit Ping(agentId, msg.sender, block.timestamp);

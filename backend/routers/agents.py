@@ -13,6 +13,11 @@ from backend.auth import require_operator_key, verify_wallet_signature
 from backend.contracts.interface import contracts
 from backend.db import get_db
 from backend.models.schema import Agent, Operator, AgentVersion, AgentStatus, StakeEvent, Policy, AgentMemory
+from backend.schemas import (
+    RegisterAgentResponse, AgentDetailResponse, AgentListItem,
+    PublishVersionResponse, SetStatusResponse, WebhookConfigResponse,
+    StakeResponse, UnstakeResponse, MemoryItem, AddMemoryResponse,
+)
 from backend.services.memory import get_recent_memories, store_context_memory
 
 router = APIRouter(prefix="/api/agents", tags=["agents"])
@@ -48,7 +53,7 @@ class SetStatusRequest(BaseModel):
     status: str  # "active", "paused", "retired"
 
 
-@router.post("")
+@router.post("", response_model=RegisterAgentResponse)
 async def register_agent(req: RegisterAgentRequest, db: AsyncSession = Depends(get_db)):
     """Register a new agent."""
     # Signature is required — wallet ownership must be proven before registration
@@ -110,7 +115,7 @@ async def register_agent(req: RegisterAgentRequest, db: AsyncSession = Depends(g
     }
 
 
-@router.get("/{agent_id}")
+@router.get("/{agent_id}", response_model=AgentDetailResponse)
 async def get_agent(agent_id: int, db: AsyncSession = Depends(get_db)):
     """Get agent details including score."""
     agent = await db.get(Agent, agent_id)
@@ -134,10 +139,14 @@ async def get_agent(agent_id: int, db: AsyncSession = Depends(get_db)):
     }
 
 
-@router.get("")
-async def list_agents(db: AsyncSession = Depends(get_db)):
+@router.get("", response_model=list[AgentListItem])
+async def list_agents(
+    limit: int = 50,
+    offset: int = 0,
+    db: AsyncSession = Depends(get_db),
+):
     """List all agents."""
-    result = await db.execute(select(Agent).order_by(Agent.id.desc()))
+    result = await db.execute(select(Agent).order_by(Agent.id.desc()).limit(limit).offset(offset))
     agents = result.scalars().all()
     return [
         {
@@ -154,7 +163,7 @@ async def list_agents(db: AsyncSession = Depends(get_db)):
     ]
 
 
-@router.post("/{agent_id}/versions")
+@router.post("/{agent_id}/versions", response_model=PublishVersionResponse)
 async def publish_version(
     agent_id: int,
     req: PublishVersionRequest,
@@ -211,7 +220,7 @@ async def publish_version(
     }
 
 
-@router.post("/{agent_id}/status")
+@router.post("/{agent_id}/status", response_model=SetStatusResponse)
 async def set_agent_status(
     agent_id: int,
     req: SetStatusRequest,
@@ -238,7 +247,7 @@ class WebhookConfigRequest(BaseModel):
     webhook_url: str | None = None
 
 
-@router.post("/{agent_id}/webhook")
+@router.post("/{agent_id}/webhook", response_model=WebhookConfigResponse)
 async def configure_webhook(
     agent_id: int,
     req: WebhookConfigRequest,
@@ -262,7 +271,7 @@ async def configure_webhook(
     }
 
 
-@router.post("/{agent_id}/stake")
+@router.post("/{agent_id}/stake", response_model=StakeResponse)
 async def stake_collateral(
     agent_id: int,
     req: StakeRequest,
@@ -304,7 +313,7 @@ async def stake_collateral(
     return {"agent_id": agent_id, "amount_wei": req.amount_wei, "event": "staked", "tx_hash": tx_hash}
 
 
-@router.post("/{agent_id}/unstake")
+@router.post("/{agent_id}/unstake", response_model=UnstakeResponse)
 async def request_unstake(
     agent_id: int,
     req: UnstakeRequest,
@@ -351,7 +360,7 @@ class AddMemoryRequest(BaseModel):
     metadata: dict | None = None
 
 
-@router.get("/{agent_id}/memories")
+@router.get("/{agent_id}/memories", response_model=list[MemoryItem])
 async def list_agent_memories(
     agent_id: int,
     memory_type: str | None = None,
@@ -377,7 +386,7 @@ async def list_agent_memories(
     ]
 
 
-@router.post("/{agent_id}/memories")
+@router.post("/{agent_id}/memories", response_model=AddMemoryResponse)
 async def add_agent_memory(
     agent_id: int,
     req: AddMemoryRequest,

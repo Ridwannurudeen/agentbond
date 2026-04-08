@@ -4,6 +4,7 @@ import { fetchDashboardStats, fetchAgents, fetchRuns, streamRun } from "../api";
 import { CopyButton } from "../components/CopyButton";
 import { Bot, Activity, FileWarning, TrendingUp, ArrowRight, ExternalLink, Play, ChevronDown, CheckCircle2, XCircle } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import type { Agent, DashboardStats, RunListItem, SSEEvent, SSEEventData } from "../types";
 
 // ── Identicon ────────────────────────────────────────────────────────────────
 function Identicon({ id, size = 28 }: { id: number; size?: number }) {
@@ -45,12 +46,12 @@ function RadialGauge({ value }: { value: number }) {
 }
 
 // ── Sparkline ────────────────────────────────────────────────────────────────
-function Sparkline({ runs }: { runs: any[] }) {
+function Sparkline({ runs }: { runs: RunListItem[] }) {
   if (runs.length < 2) return <div className="w-20 h-8" />;
   const last = runs.slice(-20);
   const w = 80, h = 32;
   const dx = w / (last.length - 1);
-  const points = last.map((r: any, i: number) => `${i * dx},${r.policy_verdict === "pass" ? 4 : h - 4}`).join(" ");
+  const points = last.map((r, i) => `${i * dx},${r.policy_verdict === "pass" ? 4 : h - 4}`).join(" ");
   return (
     <svg width={w} height={h} className="opacity-70">
       <polyline points={points} fill="none" stroke="#8b5cf6" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
@@ -100,24 +101,24 @@ const EVENT_COLORS: Record<string, string> = {
 
 // ── Main ─────────────────────────────────────────────────────────────────────
 export default function Dashboard() {
-  const [stats, setStats] = useState<any>(null);
-  const [agents, setAgents] = useState<any[]>([]);
-  const [runs, setRuns] = useState<any[]>([]);
+  const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [agents, setAgents] = useState<Agent[]>([]);
+  const [runs, setRuns] = useState<RunListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const [playAgentId, setPlayAgentId] = useState<string>("");
   const [playInput, setPlayInput] = useState("");
   const [playRunning, setPlayRunning] = useState(false);
-  const [playEvents, setPlayEvents] = useState<{ event: string; data: any }[]>([]);
-  const [playResult, setPlayResult] = useState<any>(null);
+  const [playEvents, setPlayEvents] = useState<SSEEvent[]>([]);
+  const [playResult, setPlayResult] = useState<SSEEventData | null>(null);
   const [playError, setPlayError] = useState<string | null>(null);
 
   useEffect(() => {
     Promise.all([fetchDashboardStats(), fetchAgents(), fetchRuns()])
       .then(([s, a, r]) => {
         setStats(s); setAgents(a); setRuns(r);
-        const active = a.filter((ag: any) => ag.status === "active");
+        const active = a.filter((ag) => ag.status === "active");
         if (active.length > 0) setPlayAgentId(String(active[0].id));
         else if (a.length > 0) setPlayAgentId(String(a[0].id));
       })
@@ -147,7 +148,7 @@ export default function Dashboard() {
   if (error)
     return <div className="glass-card p-8 border-red-900/50 bg-red-950/20 text-red-400 text-sm">{error}</div>;
 
-  const passRate = stats?.total_runs > 0
+  const passRate = stats && stats.total_runs > 0
     ? Math.round(((stats.total_runs - (stats.total_violations ?? 0)) / stats.total_runs) * 100)
     : null;
 
@@ -169,7 +170,7 @@ export default function Dashboard() {
       </div>
 
       {/* Stat cards */}
-      <motion.div className="grid grid-cols-4 gap-4 mb-8" variants={containerVariants} initial="hidden" animate="show">
+      <motion.div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8" variants={containerVariants} initial="hidden" animate="show">
         <motion.div variants={itemVariants}>
           <StatCard label="Agents" value={stats?.total_agents ?? 0} icon={Bot}
             sub={`${activeAgents.length} active`} />
@@ -225,8 +226,8 @@ export default function Dashboard() {
             <Link to="/operator" className="text-violet-400 no-underline hover:underline">Register one →</Link>
           </div>
         ) : (
-          <form onSubmit={handlePlay} className="flex gap-3 items-end">
-            <div className="w-44 flex-shrink-0">
+          <form onSubmit={handlePlay} className="flex flex-col sm:flex-row gap-3 sm:items-end">
+            <div className="w-full sm:w-44 sm:flex-shrink-0">
               <label className="form-label">Agent</label>
               <div className="relative">
                 <select
@@ -323,7 +324,7 @@ export default function Dashboard() {
       <div className="flex items-center justify-between mb-3">
         <h2 className="text-base font-semibold text-zinc-100">Agents</h2>
       </div>
-      <div className="glass-card mb-6 overflow-hidden">
+      <div className="glass-card mb-6 overflow-hidden overflow-x-auto">
         {agents.length === 0 ? (
           <div className="flex flex-col items-center py-16 gap-4">
             <div className="w-12 h-12 rounded-xl bg-zinc-800/80 flex items-center justify-center">
@@ -348,7 +349,7 @@ export default function Dashboard() {
               </tr>
             </thead>
             <tbody>
-              {agents.map((a: any) => (
+              {agents.map((a) => (
                 <tr key={a.id}>
                   <td>
                     <div className="flex items-center gap-2.5">
@@ -403,7 +404,7 @@ export default function Dashboard() {
           View all <ArrowRight size={12} />
         </Link>
       </div>
-      <div className="glass-card overflow-hidden">
+      <div className="glass-card overflow-hidden overflow-x-auto">
         {runs.length === 0 ? (
           <div className="flex flex-col items-center py-12 gap-3">
             <Activity size={20} className="text-zinc-700" />
@@ -416,7 +417,7 @@ export default function Dashboard() {
               <tr><th>Run ID</th><th>Agent</th><th>Verdict</th><th>Settlement TX</th><th>Time</th></tr>
             </thead>
             <tbody>
-              {runs.slice(0, 10).map((r: any) => (
+              {runs.slice(0, 10).map((r) => (
                 <tr key={r.run_id}>
                   <td>
                     <div className="flex items-center gap-1.5">

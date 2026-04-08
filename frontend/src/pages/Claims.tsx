@@ -4,6 +4,7 @@ import { fetchClaims, submitClaim } from "../api";
 import { useWallet } from "../context/WalletContext";
 import { FileWarning, CheckCircle2, XCircle } from "lucide-react";
 import { motion } from "framer-motion";
+import type { ClaimListItem, ClaimResult } from "../types";
 
 const REASON_CODES = [
   "TOOL_WHITELIST_VIOLATION",
@@ -18,7 +19,7 @@ export default function Claims() {
   const { address } = useWallet();
   const [searchParams] = useSearchParams();
 
-  const [claims, setClaims] = useState<any[]>([]);
+  const [claims, setClaims] = useState<ClaimListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [listError, setListError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -27,7 +28,7 @@ export default function Claims() {
   const [agentId, setAgentId] = useState(searchParams.get("agentId") || "");
   const [claimantAddress, setClaimantAddress] = useState("");
   const [reasonCode, setReasonCode] = useState(searchParams.get("reasonCode") || REASON_CODES[0]);
-  const [result, setResult] = useState<any>(null);
+  const [result, setResult] = useState<ClaimResult | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   useEffect(() => { if (address) setClaimantAddress(address); }, [address]);
@@ -49,8 +50,9 @@ export default function Claims() {
       setResult(res);
       const updated = await fetchClaims();
       setClaims(updated);
-    } catch (err: any) {
-      setSubmitError(err.response?.data?.detail || err.message || "Submission failed");
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { detail?: string } }; message?: string };
+      setSubmitError(e.response?.data?.detail || e.message || "Submission failed");
     }
     setSubmitting(false);
   };
@@ -69,7 +71,7 @@ export default function Claims() {
         <p className="text-sm text-zinc-600 mt-0.5">Submit and track policy violation claims</p>
       </div>
 
-      <div className="grid grid-cols-[1fr,1.6fr] gap-6 mb-6">
+      <div className="grid grid-cols-1 md:grid-cols-[1fr,1.6fr] gap-6 mb-6">
         {/* Submit form */}
         <div className="glass-card p-6">
           <div className="flex items-center gap-2 mb-5">
@@ -168,7 +170,7 @@ export default function Claims() {
 
       {/* Claims history */}
       <h2 className="text-base font-semibold text-zinc-100 mb-3">Claim History</h2>
-      <div className="glass-card overflow-hidden">
+      <div className="glass-card overflow-hidden overflow-x-auto">
         {loading ? (
           <div className="py-10 text-center text-zinc-600 text-sm">Loading...</div>
         ) : listError ? (
@@ -188,7 +190,7 @@ export default function Claims() {
               </tr>
             </thead>
             <tbody>
-              {claims.map((c: any) => (
+              {claims.map((c) => (
                 <tr key={c.id}>
                   <td className="text-zinc-400 font-mono text-xs">#{c.id}</td>
                   <td>

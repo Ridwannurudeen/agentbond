@@ -1,5 +1,6 @@
 """API key authentication for operator endpoints."""
 
+import hashlib
 import secrets
 from eth_account import Account
 from eth_account.messages import encode_defunct
@@ -16,6 +17,11 @@ def generate_api_key() -> str:
     return secrets.token_hex(24)
 
 
+def hash_api_key(key: str) -> str:
+    """SHA-256 hash an API key for storage. Never store plaintext keys."""
+    return hashlib.sha256(key.encode()).hexdigest()
+
+
 def verify_wallet_signature(message: str, signature: str, expected_address: str) -> bool:
     """Verify an EIP-191 personal_sign signature.
 
@@ -29,22 +35,24 @@ def verify_wallet_signature(message: str, signature: str, expected_address: str)
         return False
 
 
+async def _find_operator_by_key(db: AsyncSession, raw_key: str) -> Operator | None:
+    """Look up an operator by hashing the provided key and comparing."""
+    key_hash = hash_api_key(raw_key)
+    result = await db.execute(
+        select(Operator).where(Operator.api_key == key_hash)
+    )
+    return result.scalar_one_or_none()
+
+
 async def verify_operator_key(
     x_api_key: str = Header(default=None, alias="X-API-Key"),
     db: AsyncSession = Depends(get_db),
 ) -> Operator | None:
-    """Verify API key and return the operator, or None if no key provided.
-
-    For MVP, authentication is optional. When an API key is provided,
-    it must match a registered operator.
-    """
+    """Verify API key and return the operator, or None if no key provided."""
     if not x_api_key:
         return None
 
-    result = await db.execute(
-        select(Operator).where(Operator.api_key == x_api_key)
-    )
-    operator = result.scalar_one_or_none()
+    operator = await _find_operator_by_key(db, x_api_key)
     if not operator:
         raise HTTPException(401, "Invalid API key")
     return operator
@@ -58,10 +66,7 @@ async def require_operator_key(
     if not x_api_key:
         raise HTTPException(401, "API key required. Include X-API-Key header.")
 
-    result = await db.execute(
-        select(Operator).where(Operator.api_key == x_api_key)
-    )
-    operator = result.scalar_one_or_none()
+    operator = await _find_operator_by_key(db, x_api_key)
     if not operator:
         raise HTTPException(401, "Invalid API key")
     return operator

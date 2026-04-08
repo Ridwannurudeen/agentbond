@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState, useEffect } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { useWallet } from "../context/WalletContext";
 import {
@@ -11,6 +11,8 @@ import {
   LogOut,
   Zap,
   Trophy,
+  Menu,
+  X,
 } from "lucide-react";
 import { motion } from "framer-motion";
 
@@ -29,16 +31,38 @@ function truncateAddress(addr: string) {
 export default function Layout({ children }: { children: React.ReactNode }) {
   const location = useLocation();
   const { address, chainId, isConnecting, connect, disconnect } = useWallet();
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  // Close sidebar on route change
+  useEffect(() => {
+    setSidebarOpen(false);
+  }, [location.pathname]);
 
   const isActive = (path: string, exact: boolean) =>
     exact ? location.pathname === path : location.pathname.startsWith(path);
 
   return (
     <div className="flex min-h-screen bg-zinc-950">
+      {/* Mobile hamburger button */}
+      <button
+        onClick={() => setSidebarOpen(true)}
+        className="fixed top-4 left-4 z-50 md:hidden w-10 h-10 rounded-lg bg-zinc-900/80 border border-zinc-800/60 flex items-center justify-center backdrop-blur-xl cursor-pointer"
+      >
+        <Menu size={18} className="text-zinc-300" />
+      </button>
+
+      {/* Mobile overlay */}
+      {sidebarOpen && (
+        <div
+          className="fixed inset-0 bg-black/60 z-50 md:hidden"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
       {/* Sidebar */}
-      <aside className="fixed left-0 top-0 h-screen w-[220px] flex flex-col bg-zinc-900/40 border-r border-zinc-800/60 z-50 backdrop-blur-xl">
+      <aside className={`fixed left-0 top-0 h-screen w-[220px] flex flex-col bg-zinc-900/40 border-r border-zinc-800/60 z-50 backdrop-blur-xl transition-transform duration-200 ${sidebarOpen ? "translate-x-0" : "-translate-x-full"} md:translate-x-0`}>
         {/* Logo */}
-        <div className="px-5 py-5 border-b border-zinc-800/60">
+        <div className="px-5 py-5 border-b border-zinc-800/60 flex items-center justify-between">
           <Link to="/" className="no-underline">
             <div className="flex items-center gap-2.5">
               <div className="w-8 h-8 rounded-lg bg-violet-600/20 border border-violet-500/30 flex items-center justify-center flex-shrink-0">
@@ -50,6 +74,12 @@ export default function Layout({ children }: { children: React.ReactNode }) {
               </div>
             </div>
           </Link>
+          <button
+            onClick={() => setSidebarOpen(false)}
+            className="md:hidden w-8 h-8 rounded-lg flex items-center justify-center bg-transparent border-0 cursor-pointer text-zinc-500 hover:text-zinc-300"
+          >
+            <X size={16} />
+          </button>
         </div>
 
         {/* Nav */}
@@ -118,8 +148,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       </aside>
 
       {/* Main content */}
-      <main className="flex-1 ml-[220px] min-h-screen">
-        <div className="max-w-[1200px] mx-auto px-8 py-8">
+      <main className="flex-1 ml-0 md:ml-[220px] min-h-screen">
+        <div className="max-w-[1200px] mx-auto px-4 py-16 md:px-8 md:py-8">
           <motion.div
             key={location.pathname}
             initial={{ opacity: 0, y: 6 }}

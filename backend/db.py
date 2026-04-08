@@ -31,5 +31,8 @@ async def get_db():
 
 
 async def init_db():
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    # SQLite (dev/test): bootstrap schema directly.
+    # PostgreSQL (prod): Alembic migrations are the source of truth.
+    if _is_sqlite:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)

@@ -201,6 +201,7 @@ class RunResult:
     settlement_tx: str | None
     model_cid: str | None
     raw_output: str
+    verified: bool = False  # True only when executed via real OG TEE with settlement
 
 
 @dataclass
@@ -438,10 +439,11 @@ class OGExecutionClient:
                 settlement_tx=settlement_tx,
                 model_cid=model_cid,
                 raw_output=output,
+                verified=bool(settlement_tx),
             )
         except Exception as e:
-            logger.warning(f"OG SDK execution failed ({e}), falling back to mock mode")
-            return self._mock_run(run_id, input_hash, model_id, user_input, tools, simulate_tools)
+            logger.error("OG SDK execution failed: %s", e)
+            raise RuntimeError(f"TEE execution failed: {e}") from e
 
     def _resolve_model(self, og, model_id: str):
         """Resolve a model string to an OG TEE_LLM enum value."""
@@ -502,6 +504,7 @@ class OGExecutionClient:
             settlement_tx=None,  # mock: no real on-chain settlement
             model_cid=model_id,
             raw_output=output,
+            verified=False,  # mock runs are never verified
         )
 
     async def verify_proof(self, run_id: str, settlement_tx: str) -> ProofVerification:
@@ -515,14 +518,14 @@ class OGExecutionClient:
         """
         self._ensure_init()
 
-        # Mock mode: no private key configured
+        # Mock mode: no private key configured — cannot verify
         if self._client is None:
             return ProofVerification(
-                valid=True,
+                valid=False,
                 settlement_tx=settlement_tx,
-                model_cid="mock-model",
-                input_hash_match=True,
-                output_hash_match=True,
+                model_cid=None,
+                input_hash_match=False,
+                output_hash_match=False,
             )
 
         # No real settlement hash available — trust TEE attestation

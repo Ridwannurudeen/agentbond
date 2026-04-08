@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 
 interface IWarrantyPool {
     function slash(uint256 agentId, uint256 amount, uint256 claimId) external;
@@ -10,7 +12,15 @@ interface IWarrantyPool {
     function releaseCollateral(uint256 agentId, uint256 amount) external;
 }
 
-contract ClaimManager is Ownable {
+interface IAgentRegistryClaims {
+    function agents(uint256 agentId) external view returns (
+        address operator, string memory metadataURI, uint256 activeVersion,
+        uint8 status, uint256 trustScore, uint256 totalRuns, uint256 violations,
+        uint256 createdAt
+    );
+}
+
+contract ClaimManager is Initializable, OwnableUpgradeable, UUPSUpgradeable {
     enum ClaimStatus { Submitted, Verified, Approved, Rejected, Paid }
 
     struct Claim {
@@ -25,34 +35,53 @@ contract ClaimManager is Ownable {
         uint256 resolvedAt;
     }
 
-    uint256 public nextClaimId = 1;
+    uint256 public nextClaimId;
     mapping(uint256 => Claim) public claims;
-    mapping(bytes32 => uint256) public claimsByRun; // runId => claimId (one claim per run)
-    mapping(uint256 => uint256) public dailyClaimCount; // agentId => count
-    mapping(uint256 => uint256) public dailyClaimDay; // agentId => day number
+    mapping(bytes32 => uint256) public claimsByRun;
+    mapping(uint256 => uint256) public dailyClaimCount;
+    mapping(uint256 => uint256) public dailyClaimDay;
 
     uint256 public constant MAX_CLAIMS_PER_DAY = 10;
     uint256 public constant DEFAULT_CLAIM_AMOUNT = 0.01 ether;
 
     IWarrantyPool public warrantyPool;
+    IAgentRegistryClaims public agentRegistry;
     address public resolver;
 
     event ClaimSubmitted(uint256 indexed claimId, bytes32 indexed runId, address indexed claimant);
     event ClaimResolved(uint256 indexed claimId, bool approved);
     event ClaimPaid(uint256 indexed claimId, uint256 amount);
+    event ResolverUpdated(address indexed oldResolver, address indexed newResolver);
 
     modifier onlyResolver() {
         require(msg.sender == resolver, "Not resolver");
         _;
     }
 
-    constructor(address _warrantyPool, address _resolver) Ownable(msg.sender) {
-        warrantyPool = IWarrantyPool(_warrantyPool);
-        resolver = _resolver;
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
     }
 
-    function setResolver(address _resolver) external onlyOwner {
+    function initialize(address _warrantyPool, address _agentRegistry, address _resolver) public initializer {
+        require(_warrantyPool != address(0), "Zero address");
+        require(_agentRegistry != address(0), "Zero address");
+        require(_resolver != address(0), "Zero address");
+        __Ownable_init(msg.sender);
+        // UUPSUpgradeable is stateless in OZ v5 — no init needed
+        warrantyPool = IWarrantyPool(_warrantyPool);
+        agentRegistry = IAgentRegistryClaims(_agentRegistry);
         resolver = _resolver;
+        nextClaimId = 1;
+    }
+
+    function _authorizeUpgrade(address newImplementation) internal override onlyOwner {}
+
+    function setResolver(address _resolver) external onlyOwner {
+        require(_resolver != address(0), "Zero address");
+        address old = resolver;
+        resolver = _resolver;
+        emit ResolverUpdated(old, _resolver);
     }
 
     function submitClaim(
@@ -61,9 +90,12 @@ contract ClaimManager is Ownable {
         string calldata reasonCode,
         bytes32 evidenceHash
     ) external returns (uint256) {
+        require(runId != bytes32(0), "Invalid runId");
         require(claimsByRun[runId] == 0, "Claim already exists for this run");
 
-        // Rate limiting per agent per day
+        (address operator, , , , , , , ) = agentRegistry.agents(agentId);
+        require(operator != address(0), "Agent does not exist");
+
         uint256 today = block.timestamp / 1 days;
         if (dailyClaimDay[agentId] != today) {
             dailyClaimDay[agentId] = today;
@@ -86,7 +118,6 @@ contract ClaimManager is Ownable {
         });
         claimsByRun[runId] = claimId;
 
-        // Reserve collateral for potential payout
         warrantyPool.reserveCollateral(agentId, DEFAULT_CLAIM_AMOUNT);
 
         emit ClaimSubmitted(claimId, runId, msg.sender);
@@ -105,7 +136,6 @@ contract ClaimManager is Ownable {
         } else {
             claim.status = ClaimStatus.Rejected;
             claim.resolvedAt = block.timestamp;
-            // Release reserved collateral
             warrantyPool.releaseCollateral(claim.agentId, claim.amount);
         }
         emit ClaimResolved(claimId, approved);

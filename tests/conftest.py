@@ -21,5 +21,6 @@ def mock_verify_wallet_signature():
     """Bypass wallet signature verification in all tests."""
     with patch("backend.auth.verify_wallet_signature", return_value=True), \
          patch("backend.routers.agents.verify_wallet_signature", return_value=True), \
+         patch("backend.routers.claims.verify_wallet_signature", return_value=True), \
          patch("backend.main.verify_wallet_signature", return_value=True):
         yield

@@ -34,9 +34,7 @@ services:
     build:
       context: ./frontend
     ports:
-      - "3000:3000"
-    environment:
-      VITE_API_URL: http://backend:8000
+      - "3000:80"
     depends_on:
       - backend
 

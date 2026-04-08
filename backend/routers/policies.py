@@ -14,6 +14,7 @@ from backend.auth import require_operator_key
 from backend.contracts.interface import contracts
 from backend.db import get_db
 from backend.models.schema import Policy, Agent, Operator, PolicyStatus
+from backend.schemas import RegisterPolicyResponse, PolicyDetailResponse, ActivatePolicyResponse, PolicyListItem
 
 router = APIRouter(prefix="/api/policies", tags=["policies"])
 logger = logging.getLogger(__name__)
@@ -31,7 +32,7 @@ class ActivatePolicyRequest(BaseModel):
     agent_id: int
 
 
-@router.post("")
+@router.post("", response_model=RegisterPolicyResponse)
 async def register_policy(
     req: RegisterPolicyRequest,
     db: AsyncSession = Depends(get_db),
@@ -94,7 +95,7 @@ async def register_policy(
     }
 
 
-@router.get("/{policy_id}")
+@router.get("/{policy_id}", response_model=PolicyDetailResponse)
 async def get_policy(policy_id: int, db: AsyncSession = Depends(get_db)):
     """Get policy details."""
     policy = await db.get(Policy, policy_id)
@@ -112,7 +113,7 @@ async def get_policy(policy_id: int, db: AsyncSession = Depends(get_db)):
     }
 
 
-@router.post("/{policy_id}/activate")
+@router.post("/{policy_id}/activate", response_model=ActivatePolicyResponse)
 async def activate_policy(
     policy_id: int,
     req: ActivatePolicyRequest,
@@ -166,7 +167,7 @@ async def activate_policy(
     return {"policy_id": policy_id, "agent_id": req.agent_id, "status": "activated", "chain_tx": chain_tx}
 
 
-@router.get("")
+@router.get("", response_model=list[PolicyListItem])
 async def list_policies(
     agent_id: int | None = None,
     db: AsyncSession = Depends(get_db),

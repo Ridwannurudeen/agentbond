@@ -7,11 +7,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.auth import require_operator_key
 from backend.db import get_db
 from backend.models.schema import Operator, WebhookDelivery
+from backend.schemas import WebhookDeliveryItem
 
 router = APIRouter(prefix="/api/operators", tags=["operators"])
 
 
-@router.get("/{operator_id}/webhook-deliveries")
+@router.get("/{operator_id}/webhook-deliveries", response_model=list[WebhookDeliveryItem])
 async def list_webhook_deliveries(
     operator_id: int,
     event_type: str | None = Query(default=None),

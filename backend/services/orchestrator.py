@@ -6,7 +6,7 @@ import logging
 import time
 import uuid
 from datetime import datetime
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Awaitable, Callable
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,14 +23,24 @@ logger = logging.getLogger(__name__)
 og_client = OGExecutionClient(private_key=settings.og_private_key)
 
 
-async def execute_run(
+async def _execute_run_core(
     db: AsyncSession,
     agent_id: int,
     user_input: str,
     user_address: str | None = None,
     simulate_tools: list[dict] | None = None,
+    on_event: "Callable[[str, dict], Awaitable[None]] | None" = None,
 ) -> dict:
-    """Execute an agent run: call OG SDK, evaluate policy, store results."""
+    """Shared core logic for execute_run and execute_run_streaming.
+
+    If *on_event* is provided, it is called at each milestone with
+    (event_name, event_data) so the streaming wrapper can yield SSE events.
+    Returns the final result dict.
+    """
+
+    async def _emit(event: str, data: dict) -> None:
+        if on_event is not None:
+            await on_event(event, data)
 
     # Fetch agent
     agent = await db.get(Agent, agent_id)
@@ -55,11 +65,18 @@ async def execute_run(
 
     # Build memory context from prior run history and inject into prompt
     memory_block = await build_memory_context(db, agent_id)
+    await _emit("memory_loaded", {
+        "has_context": bool(memory_block),
+        "agent_id": agent_id,
+    })
+
     augmented_input = (
         f"{memory_block}\n\n## Current Request\n{user_input}"
         if memory_block
         else user_input
     )
+
+    await _emit("inference_start", {"model": model_id, "agent_id": agent_id})
 
     # Execute via OG SDK (timed for Prometheus)
     run_start = time.perf_counter()
@@ -70,6 +87,11 @@ async def execute_run(
         simulate_tools=simulate_tools,
     )
     RUN_DURATION.observe(time.perf_counter() - run_start)
+
+    await _emit("inference_done", {
+        "output": run_result.raw_output,
+        "settlement_tx": run_result.settlement_tx,
+    })
 
     # Evaluate policy
     run_metadata = {
@@ -82,6 +104,11 @@ async def execute_run(
         run_metadata=run_metadata,
     )
 
+    await _emit("policy_evaluated", {
+        "verdict": "pass" if verdict.passed else "fail",
+        "reason_codes": verdict.failed_codes if verdict.failed_codes else [],
+    })
+
     # Store run
     run = Run(
         run_id=run_result.run_id,
@@ -91,6 +118,7 @@ async def execute_run(
         output_hash=run_result.output_hash,
         transcript_json=run_result.transcript,
         settlement_tx=run_result.settlement_tx,
+        verified=run_result.verified,
         policy_verdict="pass" if verdict.passed else "fail",
         reason_codes=verdict.failed_codes if verdict.failed_codes else None,
     )
@@ -123,8 +151,26 @@ async def execute_run(
         "policy_verdict": run.policy_verdict,
         "reason_codes": run.reason_codes,
         "settlement_tx": run_result.settlement_tx,
+        "verified": run_result.verified,
         "evidence_hash": verdict.evidence_hash,
     }
+
+
+async def execute_run(
+    db: AsyncSession,
+    agent_id: int,
+    user_input: str,
+    user_address: str | None = None,
+    simulate_tools: list[dict] | None = None,
+) -> dict:
+    """Execute an agent run: call OG SDK, evaluate policy, store results."""
+    return await _execute_run_core(
+        db=db,
+        agent_id=agent_id,
+        user_input=user_input,
+        user_address=user_address,
+        simulate_tools=simulate_tools,
+    )
 
 
 async def execute_run_streaming(
@@ -138,117 +184,28 @@ async def execute_run_streaming(
 
     Yields dicts with keys: event (str), data (dict).
     """
+    events: list[dict] = []
 
-    async def _emit(event: str, data: dict) -> dict:
-        return {"event": event, "data": data}
+    async def _collect_event(event: str, data: dict) -> None:
+        events.append({"event": event, "data": data})
 
-    # Fetch agent
-    agent = await db.get(Agent, agent_id)
-    if not agent:
-        yield await _emit("error", {"message": f"Agent {agent_id} not found"})
+    try:
+        result = await _execute_run_core(
+            db=db,
+            agent_id=agent_id,
+            user_input=user_input,
+            user_address=user_address,
+            simulate_tools=simulate_tools,
+            on_event=_collect_event,
+        )
+    except ValueError as e:
+        yield {"event": "error", "data": {"message": str(e)}}
         return
-    status_val = agent.status.value if hasattr(agent.status, 'value') else str(agent.status)
-    if status_val != "active":
-        yield await _emit("error", {"message": f"Agent {agent_id} is not active"})
-        return
 
-    # Fetch active policy
-    policy_result = await db.execute(
-        select(Policy).where(
-            Policy.agent_id == agent_id,
-            Policy.status == "active"
-        ).order_by(Policy.id.desc()).limit(1)
-    )
-    policy = policy_result.scalar_one_or_none()
-    policy_rules = policy.rules_json if policy else {}
+    for ev in events:
+        yield ev
 
-    model_id = DEFAULT_MODEL
-
-    # Load memory context
-    memory_block = await build_memory_context(db, agent_id)
-    yield await _emit("memory_loaded", {
-        "has_context": bool(memory_block),
-        "agent_id": agent_id,
-    })
-
-    augmented_input = (
-        f"{memory_block}\n\n## Current Request\n{user_input}"
-        if memory_block
-        else user_input
-    )
-
-    yield await _emit("inference_start", {"model": model_id, "agent_id": agent_id})
-
-    run_start = time.perf_counter()
-    run_result: RunResult = await og_client.execute_agent_run(
-        model_id=model_id,
-        user_input=augmented_input,
-        tools=policy_rules.get("allowed_tools"),
-        simulate_tools=simulate_tools,
-    )
-    RUN_DURATION.observe(time.perf_counter() - run_start)
-
-    yield await _emit("inference_done", {
-        "output": run_result.raw_output,
-        "settlement_tx": run_result.settlement_tx,
-    })
-
-    # Evaluate policy
-    run_metadata = {
-        "declared_model": model_id,
-        "executed_model": run_result.model_cid,
-    }
-    verdict = evaluate_policy(
-        transcript=run_result.transcript,
-        policy=policy_rules,
-        run_metadata=run_metadata,
-    )
-
-    yield await _emit("policy_evaluated", {
-        "verdict": "pass" if verdict.passed else "fail",
-        "reason_codes": verdict.failed_codes if verdict.failed_codes else [],
-    })
-
-    # Store run
-    run = Run(
-        run_id=run_result.run_id,
-        agent_id=agent_id,
-        user_address=user_address,
-        input_hash=run_result.input_hash,
-        output_hash=run_result.output_hash,
-        transcript_json=run_result.transcript,
-        settlement_tx=run_result.settlement_tx,
-        policy_verdict="pass" if verdict.passed else "fail",
-        reason_codes=verdict.failed_codes if verdict.failed_codes else None,
-    )
-    db.add(run)
-    agent.total_runs += 1
-    if not verdict.passed:
-        agent.violations += 1
-
-    await store_run_memory(
-        db=db,
-        agent_id=agent_id,
-        run_id=run_result.run_id,
-        verdict="pass" if verdict.passed else "fail",
-        reason_codes=verdict.failed_codes if verdict.failed_codes else None,
-        trust_score=agent.trust_score,
-    )
-
-    await db.commit()
-    await db.refresh(run)
-
-    RUNS_TOTAL.labels(verdict=run.policy_verdict).inc()
-
-    yield await _emit("complete", {
-        "run_id": run.run_id,
-        "agent_id": agent_id,
-        "output": run_result.raw_output,
-        "policy_verdict": run.policy_verdict,
-        "reason_codes": run.reason_codes,
-        "settlement_tx": run_result.settlement_tx,
-        "evidence_hash": verdict.evidence_hash,
-    })
+    yield {"event": "complete", "data": result}
 
 
 async def replay_run(db: AsyncSession, run_id: str) -> dict:

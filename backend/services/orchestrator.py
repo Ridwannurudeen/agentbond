@@ -15,6 +15,7 @@ from backend.models.schema import Agent, Run, Policy
 from backend.services.og_client import OGExecutionClient, RunResult, DEFAULT_MODEL
 from backend.services.policy_engine import evaluate_policy
 from backend.services.memory import build_memory_context, store_run_memory
+from backend.services.reputation import snapshot_score
 from backend.config import settings
 from backend.metrics import RUNS_TOTAL, RUN_DURATION
 
@@ -172,6 +173,13 @@ async def _execute_run_core(
 
     await db.commit()
     await db.refresh(run)
+
+    # Snapshot the trust score after every run (not just after approved claims).
+    # This gives the score-history chart one data point per consequential event.
+    try:
+        await snapshot_score(db, agent_id)
+    except Exception as e:
+        logger.warning("snapshot_score failed for agent %s: %s", agent_id, e)
 
     RUNS_TOTAL.labels(verdict=run.policy_verdict).inc()
 

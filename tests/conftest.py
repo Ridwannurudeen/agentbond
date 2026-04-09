@@ -1,5 +1,7 @@
 """Shared test configuration and fixtures."""
 
+import hashlib
+import time
 import pytest
 from unittest.mock import patch
 
@@ -21,6 +23,18 @@ TEST_DB_URL = "sqlite+aiosqlite:///test_shared.db"
 # Dummy values passed in requests so the presence check passes
 TEST_SIGNATURE = "0x" + "a" * 130
 TEST_MESSAGE = "test message"
+
+
+def build_run_message(agent_id: int, user_input: str) -> str:
+    """Build a canonical per-run signed message matching the backend's format.
+
+    Tests call this to produce a valid message that passes _verify_run_authorization
+    (agent id + SHA-256 prompt hash + fresh timestamp). Signature verification
+    itself is mocked by the autouse fixture below.
+    """
+    prompt_hash = hashlib.sha256(user_input.encode()).hexdigest()
+    ts = int(time.time())
+    return f"AgentBond run\nAgent: {agent_id}\nPrompt: {prompt_hash}\nTimestamp: {ts}"
 
 
 @pytest.fixture(autouse=True)

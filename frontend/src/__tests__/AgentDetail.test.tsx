@@ -311,6 +311,10 @@ describe("AgentDetail — SSE streaming run", () => {
     fireEvent.change(textarea, { target: { value: "done test" } });
     fireEvent.submit(textarea.closest("form")!);
 
+    // handleRun is async — wait for streamRun to be called and the onDone
+    // callback to be captured before invoking it.
+    await waitFor(() => expect(capturedOnDone).toBeTruthy());
+
     // Verify it's disabled while running
     await waitFor(() =>
       expect(screen.getByRole("button", { name: /running/i })).toBeDisabled()

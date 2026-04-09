@@ -4,6 +4,7 @@ import {
   fetchAgent, fetchRuns, fetchClaims, fetchScore, fetchScoreHistory, fetchPolicies,
   activatePolicy, fetchAgentMemories, streamRun, generateApiKey,
 } from "../api";
+import { buildRunMessage } from "../utils/runSignature";
 import { useWallet } from "../context/WalletContext";
 import { CopyButton } from "../components/CopyButton";
 import {
@@ -201,7 +202,8 @@ export default function AgentDetail() {
       const sigForKey = await signer.signMessage("AgentBond API key request");
       const { api_key } = await generateApiKey(address, sigForKey, "AgentBond API key request");
 
-      const runMessage = `AgentBond run for agent ${agentId}\nPrompt: ${userInput}\nAt: ${Date.now()}`;
+      // Canonical run message: binds to agent id, prompt hash, and a fresh timestamp
+      const runMessage = await buildRunMessage(agentId, userInput);
       const runSignature = await signer.signMessage(runMessage);
 
       streamRun(

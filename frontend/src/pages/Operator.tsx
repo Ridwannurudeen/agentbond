@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { registerAgent, generateApiKey, registerPolicy, stakeCollateral, executeRun, fetchAgent } from "../api";
+import { buildRunMessage } from "../utils/runSignature";
 import { useWallet } from "../context/WalletContext";
 import { getAgentRegistry, getWarrantyPool, getPolicyRegistry } from "../contracts";
 import { sha256, toUtf8Bytes } from "ethers";
@@ -291,9 +292,8 @@ export default function Operator() {
     setRunLoading(true);
     setRunResult(null);
     try {
-      // Always sign to authorize this specific run
-      const ts = Date.now();
-      const message = `AgentBond run authorization\nAgent: ${runAgentId}\nWallet: ${address}\nTimestamp: ${ts}`;
+      // Canonical run message: binds to agent id, prompt hash, and a fresh timestamp
+      const message = await buildRunMessage(parseInt(runAgentId), userInput);
       const signature = await signer.signMessage(message);
 
       const key = await ensureApiKey();

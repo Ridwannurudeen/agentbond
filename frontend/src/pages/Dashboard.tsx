@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { fetchDashboardStats, fetchAgents, fetchRuns, streamRun, generateApiKey } from "../api";
+import { buildRunMessage } from "../utils/runSignature";
 import { useWallet } from "../context/WalletContext";
 import { CopyButton } from "../components/CopyButton";
 import { Bot, Activity, FileWarning, TrendingUp, ArrowRight, ExternalLink, Play, ChevronDown, CheckCircle2, XCircle } from "lucide-react";
@@ -145,8 +146,8 @@ export default function Dashboard() {
       const sigForKey = await signer.signMessage("AgentBond API key request");
       const { api_key } = await generateApiKey(address, sigForKey, "AgentBond API key request");
 
-      // Per-run authorization signature — binds this specific run to the operator wallet
-      const runMessage = `AgentBond run for agent ${playAgentId}\nPrompt: ${playInput}\nAt: ${Date.now()}`;
+      // Canonical run message: binds to agent id, prompt hash, and a fresh timestamp
+      const runMessage = await buildRunMessage(parseInt(playAgentId), playInput);
       const runSignature = await signer.signMessage(runMessage);
 
       streamRun(

@@ -334,11 +334,13 @@ class TestMemoryEndpoints:
         agent_id, api_key = await self._setup_agent_with_key(client)
 
         # Execute a run (mock mode, requires operator key + per-run signature)
+        from tests.conftest import build_run_message
+        user_input = "Hello agent"
         r = await client.post("/api/runs", json={
             "agent_id": agent_id,
-            "user_input": "Hello agent",
+            "user_input": user_input,
             "signature": "0xtest",
-            "message": f"AgentBond run for agent {agent_id}",
+            "message": build_run_message(agent_id, user_input),
         }, headers={"X-API-Key": api_key})
         assert r.status_code == 200
 
@@ -361,11 +363,13 @@ class TestMemoryEndpoints:
         )
 
         # Run to create a success/violation memory
+        from tests.conftest import build_run_message
+        run_input = "Test run"
         await client.post("/api/runs", json={
             "agent_id": agent_id,
-            "user_input": "Test run",
+            "user_input": run_input,
             "signature": "0xtest",
-            "message": f"AgentBond run for agent {agent_id}",
+            "message": build_run_message(agent_id, run_input),
         }, headers={"X-API-Key": api_key})
 
         # Filter by type

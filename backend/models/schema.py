@@ -99,7 +99,19 @@ class Run(Base):
     output_hash = Column(String(66), nullable=True)
     transcript_json = Column(JSON, nullable=True)
     settlement_tx = Column(String(66), nullable=True)
-    verified = Column(Boolean, nullable=False, default=False)  # True only for real TEE-attested runs
+    # proof_status: "verified" (real TEE + settlement) | "unverified" (mock, dev only) | "failed"
+    proof_status = Column(String(16), nullable=False, default="unverified")
+    verified = Column(Boolean, nullable=False, default=False)  # legacy flag; True only for real TEE-attested runs
+    # Execution bundle snapshot — frozen at run time so replay/claims cannot be rewritten
+    policy_id_snapshot = Column(Integer, nullable=True)
+    policy_hash_snapshot = Column(String(66), nullable=True)
+    policy_rules_snapshot = Column(JSON, nullable=True)
+    agent_version_snapshot = Column(Integer, nullable=True)
+    model_id_snapshot = Column(String(128), nullable=True)
+    allowed_tools_snapshot = Column(JSON, nullable=True)
+    # Per-run authorization signature from operator wallet
+    run_signature = Column(Text, nullable=True)
+    run_message = Column(Text, nullable=True)
     policy_verdict = Column(String(10), nullable=True)  # "pass" or "fail"
     reason_codes = Column(JSON, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)

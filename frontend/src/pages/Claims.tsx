@@ -40,13 +40,22 @@ export default function Claims() {
       .finally(() => setLoading(false));
   }, []);
 
+  const { signer } = useWallet();
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitting(true);
     setResult(null);
     setSubmitError(null);
     try {
-      const res = await submitClaim(runId, parseInt(agentId), claimantAddress, reasonCode);
+      if (!signer) {
+        throw new Error("Connect your wallet to submit a claim");
+      }
+      // Sign a message proving the claimant wallet owns the address.
+      // The message binds the claim to a specific run so signatures cannot be replayed.
+      const message = `AgentBond claim\nRun: ${runId}\nReason: ${reasonCode}\nClaimant: ${claimantAddress}\nAt: ${Date.now()}`;
+      const signature = await signer.signMessage(message);
+      const res = await submitClaim(runId, claimantAddress, reasonCode, signature, message);
       setResult(res);
       const updated = await fetchClaims();
       setClaims(updated);

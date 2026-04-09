@@ -333,10 +333,12 @@ class TestMemoryEndpoints:
     async def test_memories_populated_after_run(self, client):
         agent_id, api_key = await self._setup_agent_with_key(client)
 
-        # Execute a run (mock mode, requires operator key)
+        # Execute a run (mock mode, requires operator key + per-run signature)
         r = await client.post("/api/runs", json={
             "agent_id": agent_id,
             "user_input": "Hello agent",
+            "signature": "0xtest",
+            "message": f"AgentBond run for agent {agent_id}",
         }, headers={"X-API-Key": api_key})
         assert r.status_code == 200
 
@@ -362,6 +364,8 @@ class TestMemoryEndpoints:
         await client.post("/api/runs", json={
             "agent_id": agent_id,
             "user_input": "Test run",
+            "signature": "0xtest",
+            "message": f"AgentBond run for agent {agent_id}",
         }, headers={"X-API-Key": api_key})
 
         # Filter by type

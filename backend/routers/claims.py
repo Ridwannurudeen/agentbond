@@ -32,18 +32,29 @@ logger = logging.getLogger(__name__)
 
 
 class SubmitClaimRequest(BaseModel):
-    run_id: str  # the run's UUID
-    agent_id: int
+    run_id: str  # the run's UUID (agent_id is DERIVED from this, never trusted from the request)
     claimant_address: str
     reason_code: str
     evidence: dict | None = None
     signature: str  # EIP-191 wallet signature proving claimant_address ownership
     message: str    # the signed message
+    # Optional: the user's on-chain claim submission tx hash. If present, the user already
+    # submitted the claim on-chain via MetaMask and this is the audit receipt. The backend
+    # never submits claims as itself — on-chain claimant is always the real user wallet.
+    chain_claim_id: int | None = None
+    chain_submit_tx: str | None = None
 
 
 @router.post("", response_model=SubmitClaimResponse)
 async def submit_claim(req: SubmitClaimRequest, db: AsyncSession = Depends(get_db)):
-    """Submit a warranty claim against a run."""
+    """Submit a warranty claim against a run.
+
+    Trust model:
+    - claimant_address must prove ownership via wallet signature
+    - agent_id is DERIVED from the referenced run, never trusted from the request
+    - On-chain claim is submitted by the user's wallet (frontend / MetaMask), not the
+      backend — the resolver only verifies and executes payout.
+    """
     # Verify wallet signature — claimant must prove address ownership
     if not verify_wallet_signature(req.message, req.signature, req.claimant_address):
         raise HTTPException(401, "Signature verification failed: claimant address ownership not proven")
@@ -69,11 +80,19 @@ async def submit_claim(req: SubmitClaimRequest, db: AsyncSession = Depends(get_d
             f"Daily claim limit reached. Maximum {DAILY_CLAIM_LIMIT} claims per address per day.",
         )
 
-    # Validate run exists
+    # Validate run exists — and derive agent_id from it (never trust req)
     result = await db.execute(select(Run).where(Run.run_id == req.run_id))
     run = result.scalar_one_or_none()
     if not run:
         raise HTTPException(404, "Run not found")
+    agent_id = run.agent_id  # authoritative source
+
+    # Unverified runs cannot back a claim — trust model requires TEE attestation
+    if run.proof_status != "verified":
+        raise HTTPException(
+            400,
+            f"Run is not TEE-verified (proof_status={run.proof_status}); not insurable"
+        )
 
     # Check no existing claim for this run
     existing = await db.execute(
@@ -88,11 +107,12 @@ async def submit_claim(req: SubmitClaimRequest, db: AsyncSession = Depends(get_d
 
     claim = Claim(
         run_id=run.id,
-        agent_id=req.agent_id,
+        agent_id=agent_id,
         claimant_address=req.claimant_address,
         reason_code=req.reason_code,
         evidence_hash=evidence_hash,
         status=ClaimStatus.submitted,
+        chain_claim_id=req.chain_claim_id,  # recorded from user's on-chain tx
     )
     db.add(claim)
     await db.commit()
@@ -102,10 +122,10 @@ async def submit_claim(req: SubmitClaimRequest, db: AsyncSession = Depends(get_d
 
     # Notify operator of claim submission
     await notify_claim_submitted(
-        db, req.agent_id, claim.id, req.reason_code, req.run_id
+        db, agent_id, claim.id, req.reason_code, req.run_id
     )
 
-    # Auto-verify
+    # Auto-verify against the snapshotted policy
     verification = await verify_claim(db, claim.id)
 
     if verification.approved:
@@ -116,54 +136,45 @@ async def submit_claim(req: SubmitClaimRequest, db: AsyncSession = Depends(get_d
         CLAIMS_TOTAL.labels(status="approved").inc()
 
         # Update reputation
-        await snapshot_score(db, req.agent_id)
+        await snapshot_score(db, agent_id)
 
     if not verification.approved:
         CLAIMS_TOTAL.labels(status="rejected").inc()
 
     # Notify operator of resolution
     await notify_claim_resolved(
-        db, req.agent_id, claim.id, verification.approved, verification.reason
+        db, agent_id, claim.id, verification.approved, verification.reason
     )
 
-    # Wire up on-chain: submit + verify + payout
-    chain_claim_id = None
-    chain_submit_tx = None
+    # Resolver-side on-chain actions (verify + payout). The resolver wallet only acts
+    # on an already-submitted user claim — it never submits the claim itself, so the
+    # on-chain `claimant` is always the real user, not the backend.
     chain_payout_tx = None
 
-    agent = await db.get(Agent, req.agent_id)
-    if contracts.is_configured() and agent and agent.chain_agent_id is not None:
+    agent = await db.get(Agent, agent_id)
+    if (
+        contracts.is_configured()
+        and agent
+        and agent.chain_agent_id is not None
+        and req.chain_claim_id is not None
+    ):
         try:
-            run_id_bytes = Web3.keccak(text=run.run_id)
-            evidence_hash_bytes = bytes.fromhex(evidence_hash)
-
-            chain_claim_id, chain_submit_tx = await asyncio.to_thread(
-                contracts.submit_claim,
-                run_id_bytes,
-                agent.chain_agent_id,
-                req.reason_code,
-                evidence_hash_bytes,
-            )
-            claim.chain_claim_id = chain_claim_id
-            await db.commit()
-            logger.info(f"Claim {claim.id} submitted on-chain: chainClaimId={chain_claim_id} tx={chain_submit_tx}")
-
-            # Verify on-chain
+            # Verify on-chain using the user's claim ID
             await asyncio.to_thread(
-                contracts.verify_claim, chain_claim_id, verification.approved
+                contracts.verify_claim, req.chain_claim_id, verification.approved
             )
 
-            # Execute payout if approved
+            # Execute payout to the user if approved
             if verification.approved:
                 chain_payout_tx = await asyncio.to_thread(
-                    contracts.execute_payout, chain_claim_id
+                    contracts.execute_payout, req.chain_claim_id
                 )
                 claim.status = ClaimStatus.paid
                 await db.commit()
                 logger.info(f"Claim {claim.id} paid on-chain: tx={chain_payout_tx}")
 
         except Exception as e:
-            logger.warning(f"On-chain claim processing failed (non-fatal): {e}")
+            logger.warning(f"On-chain claim resolution failed (non-fatal): {e}")
 
     return {
         "claim_id": claim.id,
@@ -171,8 +182,8 @@ async def submit_claim(req: SubmitClaimRequest, db: AsyncSession = Depends(get_d
         "approved": verification.approved,
         "reason": verification.reason,
         "evidence_hash": verification.evidence_hash,
-        "chain_claim_id": chain_claim_id,
-        "chain_submit_tx": chain_submit_tx,
+        "chain_claim_id": req.chain_claim_id,
+        "chain_submit_tx": req.chain_submit_tx,
         "chain_payout_tx": chain_payout_tx,
     }
 

@@ -111,10 +111,12 @@ class TestFullLifecycle:
         }, headers=auth_headers)
         assert r.status_code == 200
 
-        # 4. Execute run (requires operator API key)
+        # 4. Execute run (requires operator API key + per-run wallet signature)
         r = await client.post("/api/runs", json={
             "agent_id": agent_id,
             "user_input": "What is the price of ETH?",
+            "signature": "0xtest",
+            "message": f"AgentBond run for agent {agent_id}",
         }, headers=auth_headers)
         assert r.status_code == 200
         run_data = r.json()
@@ -220,6 +222,8 @@ class TestFullLifecycle:
             "simulate_tools": [
                 {"tool": "place_order", "args": {"symbol": "ETH", "side": "buy", "amount": 50}},
             ],
+            "signature": "0xtest",
+            "message": f"AgentBond run for agent {agent_id}",
         }, headers=auth_headers)
         assert r.status_code == 200
         run_data = r.json()

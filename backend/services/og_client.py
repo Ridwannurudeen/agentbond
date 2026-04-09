@@ -281,19 +281,32 @@ def _extract_tool_calls(chat_output: dict) -> list[dict]:
 
 
 class OGExecutionClient:
-    """Thin wrapper around OpenGradient SDK for verifiable agent execution."""
+    """Thin wrapper around OpenGradient SDK for verifiable agent execution.
 
-    def __init__(self, private_key: str):
+    Operates in one of two modes:
+        - live: real TEE inference via OpenGradient SDK, results have proof_status="verified"
+                when a settlement tx exists.
+        - mock: local deterministic simulation for dev/tests, proof_status="unverified".
+
+    In production (settings.require_verified_execution=True), mock mode is FORBIDDEN:
+    if the SDK cannot initialize, execute_agent_run() raises RuntimeError rather than
+    silently returning fake data. A grant-stage warranty product must never fail open.
+    """
+
+    def __init__(self, private_key: str, require_verified: bool = True):
         self.private_key = private_key
+        self.require_verified = require_verified
         self._client = None
         self._initialized = False
+        self._init_error: str | None = None
         self._approved = False
 
     def _ensure_init(self):
         if self._initialized:
             return
         if not self.private_key or not self.private_key.startswith("0x") or len(self.private_key) < 66:
-            logger.warning("No valid OG private key configured. Running in mock mode.")
+            self._init_error = "No valid OG private key configured"
+            logger.warning(f"{self._init_error}; mock mode only allowed in dev")
             self._client = None
             self._initialized = True
             return
@@ -303,7 +316,8 @@ class OGExecutionClient:
             self._initialized = True
             logger.info("OpenGradient SDK initialized (live mode)")
         except Exception as e:
-            logger.warning(f"OpenGradient SDK unavailable ({e}). Running in mock mode.")
+            self._init_error = f"OpenGradient SDK init failed: {e}"
+            logger.error(self._init_error)
             self._client = None
             self._initialized = True
 
@@ -338,7 +352,16 @@ class OGExecutionClient:
         run_id = uuid.uuid4().hex
         input_hash = hashlib.sha256(user_input.encode()).hexdigest()
 
+        # Fail closed: if the live SDK is unavailable and we require verification,
+        # refuse to serve unverified data. Warranty claims cannot be anchored to
+        # fake outputs.
         if self._client is None:
+            if self.require_verified:
+                raise RuntimeError(
+                    f"TEE execution unavailable and mock fallback is disabled: "
+                    f"{self._init_error or 'SDK not initialized'}. "
+                    f"Set REQUIRE_VERIFIED_EXECUTION=false only in development."
+                )
             return self._mock_run(run_id, input_hash, model_id, user_input, tools, simulate_tools)
 
         # Real OG SDK execution

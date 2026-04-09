@@ -10,7 +10,7 @@ The result: **agents operate in a trust vacuum.** Users can't distinguish a reli
 
 ## The Solution
 
-AgentBond is an on-chain warranty layer for AI agents. Operators stake collateral as a guarantee of good behaviour. Every agent execution is verifiably attested via TEE (Trusted Execution Environment) inference through OpenGradient. Policy violations are deterministically detected by an on-chain policy engine. When violations are confirmed, collateral is automatically slashed and users are reimbursed — no disputes, no manual review.
+AgentBond is an on-chain warranty layer for AI agents. Operators stake collateral as a guarantee of good behaviour. Every agent execution is verifiably attested via TEE (Trusted Execution Environment) inference through OpenGradient, with an x402 settlement receipt on Base Sepolia. A deterministic policy engine (pure Python, evidence-hashed so anyone can re-run it) detects violations against the policy that was frozen into the run at execution time. When violations are confirmed, collateral is slashed on-chain and users are reimbursed — no disputes, no manual review.
 
 ### How It Works
 
@@ -190,16 +190,35 @@ User input → LLM (OG TEE) → tool call → execute tool → LLM with result �
 | `send_funds` | Simulated transfer |
 | `web_search` / `summarize` / `extract_data` | Stubs |
 
+The run endpoint requires TWO credentials: an operator API key (for rate limiting + agent ownership) AND a per-run wallet signature (binds THIS exact prompt to the operator wallet). The signed message must include the agent id, a SHA-256 hash of `user_input`, and a recent UNIX timestamp — without this, signatures could be replayed across different prompts.
+
 ```bash
-curl -X POST http://localhost:8000/api/runs \
+# Build the canonical run message. PROMPT_HASH is sha256 of the exact user_input.
+PROMPT="What is the current price of ETH?"
+PROMPT_HASH=$(printf '%s' "$PROMPT" | sha256sum | cut -d' ' -f1)
+TIMESTAMP=$(date +%s)
+MESSAGE=$(printf 'AgentBond run\nAgent: 1\nPrompt: %s\nTimestamp: %s' "$PROMPT_HASH" "$TIMESTAMP")
+
+# Sign $MESSAGE with the operator wallet (frontend does this via MetaMask)
+SIGNATURE="0x..."  # wallet.signMessage(MESSAGE)
+
+curl -X POST https://agentbond.gudman.xyz/api/runs \
   -H "Content-Type: application/json" \
   -H "X-API-Key: YOUR_OPERATOR_KEY" \
-  -d '{"agent_id": 1, "user_input": "What is the current price of ETH?"}'
+  -d "{
+    \"agent_id\": 1,
+    \"user_input\": \"$PROMPT\",
+    \"signature\": \"$SIGNATURE\",
+    \"message\": \"$MESSAGE\"
+  }"
 # output: "The current price of Ethereum (ETH) is $1,984.11 USD."
 # policy_verdict: "pass"
-# verified: true (TEE-attested) or false (mock mode)
+# proof_status: "verified" (TEE + settlement tx) or "unverified" (dev only)
+# policy_hash: "0x..." (frozen at run time; replay/claims use this)
 # evidence_hash: "616e274504f2d5274cbc13d885a1701e..."
 ```
+
+Signatures expire after 5 minutes. A signed message for prompt A cannot be used for prompt B — the backend verifies `sha256(user_input) == Prompt: <hash>` line in the signed message.
 
 ## API Reference
 
@@ -297,10 +316,17 @@ Memory types:
 Use `/api/runs/stream` to receive live progress events during a run:
 
 ```bash
-curl -X POST http://localhost:8000/api/runs/stream \
+# Same auth as POST /api/runs — X-API-Key header + signed per-run message with
+# Agent, Prompt (sha256), and Timestamp. See the "API Reference" section above.
+curl -X POST https://agentbond.gudman.xyz/api/runs/stream \
   -H "Content-Type: application/json" \
   -H "X-API-Key: YOUR_OPERATOR_KEY" \
-  -d '{"agent_id": 1, "user_input": "What is the price of ETH?"}'
+  -d "{
+    \"agent_id\": 1,
+    \"user_input\": \"$PROMPT\",
+    \"signature\": \"$SIGNATURE\",
+    \"message\": \"$MESSAGE\"
+  }"
 ```
 
 Events emitted in order:

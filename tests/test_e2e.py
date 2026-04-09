@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, Asyn
 
 from backend.main import app
 from backend.db import Base, get_db
+from tests.conftest import build_run_message
 
 
 # Use SQLite for testing
@@ -112,11 +113,12 @@ class TestFullLifecycle:
         assert r.status_code == 200
 
         # 4. Execute run (requires operator API key + per-run wallet signature)
+        user_input = "What is the price of ETH?"
         r = await client.post("/api/runs", json={
             "agent_id": agent_id,
-            "user_input": "What is the price of ETH?",
+            "user_input": user_input,
             "signature": "0xtest",
-            "message": f"AgentBond run for agent {agent_id}",
+            "message": build_run_message(agent_id, user_input),
         }, headers=auth_headers)
         assert r.status_code == 200
         run_data = r.json()
@@ -216,14 +218,15 @@ class TestFullLifecycle:
 
         # 4. Execute a run that violates the policy via simulate_tools
         #    place_order is NOT in allowed_tools -> TOOL_WHITELIST_VIOLATION
+        violation_input = "Buy 50 ETH immediately"
         r = await client.post("/api/runs", json={
             "agent_id": agent_id,
-            "user_input": "Buy 50 ETH immediately",
+            "user_input": violation_input,
             "simulate_tools": [
                 {"tool": "place_order", "args": {"symbol": "ETH", "side": "buy", "amount": 50}},
             ],
             "signature": "0xtest",
-            "message": f"AgentBond run for agent {agent_id}",
+            "message": build_run_message(agent_id, violation_input),
         }, headers=auth_headers)
         assert r.status_code == 200
         run_data = r.json()

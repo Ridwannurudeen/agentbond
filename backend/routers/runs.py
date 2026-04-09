@@ -1,6 +1,9 @@
 """Run execution and replay endpoints."""
 
+import hashlib
 import json
+import re
+import time
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
@@ -16,6 +19,10 @@ from backend.services.orchestrator import execute_run, execute_run_streaming, re
 
 router = APIRouter(prefix="/api/runs", tags=["runs"])
 
+# Per-run signature freshness window — a message signed more than this many
+# seconds ago is rejected, so an old signature cannot be replayed indefinitely.
+SIGNATURE_FRESHNESS_SECONDS = 300  # 5 minutes
+
 
 class ExecuteRunRequest(BaseModel):
     agent_id: int
@@ -23,10 +30,15 @@ class ExecuteRunRequest(BaseModel):
     user_address: str | None = None
     simulate_tools: list[dict] | None = None
     # Per-run authorization: the operator wallet signs a message binding this specific
-    # run. Without a valid signature the run cannot be anchored to a real identity —
-    # "authorized run" stops being UI theater.
+    # run. The message must include the agent id, a SHA-256 hash of the exact prompt,
+    # and a recent UNIX timestamp. Without this binding, one signature could be replayed
+    # across different prompts or reused indefinitely.
     signature: str | None = None
     message: str | None = None
+
+
+def _sha256_hex(s: str) -> str:
+    return hashlib.sha256(s.encode()).hexdigest()
 
 
 async def _verify_run_authorization(
@@ -34,26 +46,84 @@ async def _verify_run_authorization(
     operator: Operator,
     agent: Agent,
 ) -> None:
-    """Verify that the operator wallet signed this specific run request.
+    """Verify that the operator wallet signed THIS specific prompt at THIS specific time.
 
-    Requires:
-      - signature + message present
-      - signature recovers to the operator's wallet_address
-      - message contains the agent_id so signatures cannot be reused across agents
+    The signed message must bind:
+      - agent_id (prevents cross-agent replay)
+      - SHA-256 hash of user_input (prevents prompt swap)
+      - Recent UNIX timestamp (prevents long-term replay)
+      - Optionally user_address (audit trail for 3rd-party end users)
+
+    Expected message shape (line order enforced by substring checks, not strict parse):
+        AgentBond run
+        Agent: <agent.id> or <agent.chain_agent_id>
+        Prompt: <sha256 hex of user_input>
+        Timestamp: <unix seconds>
     """
     if not req.signature or not req.message:
         raise HTTPException(
             401,
             "Per-run signature required. Sign the run message with your operator wallet."
         )
+
+    # 1. Cryptographic recovery: signature must come from the operator wallet
     if not verify_wallet_signature(req.message, req.signature, operator.wallet_address):
         raise HTTPException(401, "Run signature does not match operator wallet")
-    if str(agent.id) not in req.message and (
-        agent.chain_agent_id is None or str(agent.chain_agent_id) not in req.message
-    ):
+
+    # 2. Agent binding: the signed message must carry an `Agent: <id>` line that
+    #    matches this exact agent. Strict regex parse — no substring matching,
+    #    since the timestamp also contains digits.
+    agent_match = re.search(r"Agent:\s*(\d+)", req.message)
+    if not agent_match:
         raise HTTPException(
             401,
-            "Run message must reference the agent id — prevents cross-agent signature replay"
+            "Run message must include 'Agent: <id>' — prevents cross-agent replay"
+        )
+    signed_agent_id = int(agent_match.group(1))
+    expected_ids = {agent.id}
+    if agent.chain_agent_id is not None:
+        expected_ids.add(agent.chain_agent_id)
+    if signed_agent_id not in expected_ids:
+        raise HTTPException(
+            401,
+            f"Signed agent id {signed_agent_id} does not match request agent {agent.id}"
+        )
+
+    # 3. Prompt binding: the signed message must carry the SHA-256 hash of the
+    #    exact user_input. Stops signatures being reused across different prompts.
+    prompt_hash = _sha256_hex(req.user_input)
+    prompt_match = re.search(r"Prompt:\s*([0-9a-f]{64})", req.message)
+    if not prompt_match:
+        raise HTTPException(
+            401,
+            "Run message must include 'Prompt: <sha256 hex>' — prevents prompt replay"
+        )
+    if prompt_match.group(1) != prompt_hash:
+        raise HTTPException(
+            401,
+            "Signed prompt hash does not match user_input — prompt mismatch"
+        )
+
+    # 4. Freshness: message must carry a recent UNIX timestamp. Rejects signatures
+    #    older than SIGNATURE_FRESHNESS_SECONDS, so a leaked signature cannot be
+    #    weaponized forever.
+    ts_match = re.search(r"Timestamp:\s*(\d{9,13})", req.message)
+    if not ts_match:
+        raise HTTPException(
+            401,
+            "Run message must include 'Timestamp: <unix seconds>' — prevents long-term replay"
+        )
+    ts_raw = int(ts_match.group(1))
+    # Accept either seconds or milliseconds
+    ts = ts_raw // 1000 if ts_raw > 10**12 else ts_raw
+    now = int(time.time())
+    age = now - ts
+    if age < -SIGNATURE_FRESHNESS_SECONDS:
+        raise HTTPException(401, "Run signature timestamp is in the future")
+    if age > SIGNATURE_FRESHNESS_SECONDS:
+        raise HTTPException(
+            401,
+            f"Run signature expired (age {age}s, max {SIGNATURE_FRESHNESS_SECONDS}s). Sign a fresh message."
         )
 
 

@@ -20,12 +20,14 @@ from backend.main import app
 from backend.db import Base, get_db
 
 
-TEST_DB_URL = "sqlite+aiosqlite:///test_sig_binding.db"
-
-
 @pytest.fixture
-async def test_db():
-    engine = create_async_engine(TEST_DB_URL, echo=False)
+async def test_db(tmp_path):
+    # Unique on-disk SQLite per test — avoids file-state leakage between tests
+    # and across CI runs. Using a file (not :memory:) because aiosqlite + async
+    # engines need a shared connection pool for in-memory DBs.
+    db_path = tmp_path / "sig_binding.db"
+    url = f"sqlite+aiosqlite:///{db_path}"
+    engine = create_async_engine(url, echo=False)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     session_maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
@@ -36,8 +38,6 @@ async def test_db():
 
     app.dependency_overrides[get_db] = override_get_db
     yield
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
     await engine.dispose()
     app.dependency_overrides.clear()
 
@@ -55,20 +55,28 @@ def _msg(agent_id: int, prompt: str, ts: int | None = None) -> str:
     return f"AgentBond run\nAgent: {agent_id}\nPrompt: {prompt_hash}\nTimestamp: {ts}"
 
 
-async def _setup(client):
-    wallet = "0xsigbind0000000000000000000000000000001"
+async def _setup(client, wallet_suffix: str = "1"):
+    # Unique wallet per test avoids operator collisions even if fixture teardown
+    # order is unexpected. 42-char address with only hex digits.
+    wallet = f"0xsigbind{'0' * (33 - len(wallet_suffix))}{wallet_suffix}"
     r = await client.post("/api/agents", json={
         "wallet_address": wallet,
         "metadata_uri": "ipfs://sigbind",
         "signature": "0xtest", "message": "test",
     })
+    assert r.status_code == 200, f"register_agent failed: {r.status_code} {r.text}"
     agent_id = r.json()["id"]
+
     r = await client.post(f"/api/operators/{wallet}/api-key")
+    assert r.status_code == 200, f"api-key failed: {r.status_code} {r.text}"
     key = r.json()["api_key"]
-    await client.post("/api/policies", json={
+
+    r = await client.post("/api/policies", json={
         "agent_id": agent_id,
         "rules": {"allowed_tools": ["get_price"]},
     }, headers={"X-API-Key": key})
+    assert r.status_code == 200, f"policy failed: {r.status_code} {r.text}"
+
     return agent_id, {"X-API-Key": key}
 
 

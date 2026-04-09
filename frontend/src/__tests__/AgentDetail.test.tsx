@@ -31,6 +31,14 @@ vi.mock("../context/WalletContext", () => ({
   }),
 }));
 
+// Mock buildRunMessage — the real impl uses crypto.subtle which isn't always
+// available in CI jsdom/happy-dom environments. Tests only care about the UI
+// flow, not the exact canonical message format.
+vi.mock("../utils/runSignature", () => ({
+  buildRunMessage: vi.fn().mockResolvedValue("AgentBond run\nAgent: 1\nPrompt: x\nTimestamp: 0"),
+  sha256Hex: vi.fn().mockResolvedValue("deadbeef"),
+}));
+
 import {
   fetchAgent,
   fetchRuns,

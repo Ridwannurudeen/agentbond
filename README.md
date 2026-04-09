@@ -158,7 +158,7 @@ The Dashboard Quick Run lets you try any active agent without navigating to its 
 
 ### Score History
 
-Each agent's detail page shows a line chart of trust score over time pulled from `/api/scores/{agentId}/history`. Score is computed live from run history and violation ratio; snapshots are persisted whenever a claim is approved (so the chart shows the score trajectory at every consequential moment).
+Each agent's detail page shows a line chart of trust score over time pulled from `/api/scores/{agentId}/history`. A snapshot is persisted after every run and after every approved claim, so the chart captures the score trajectory at every consequential event.
 
 ### Policy Rules
 

@@ -306,9 +306,12 @@ class OGExecutionClient:
             return
         if not self.private_key or not self.private_key.startswith("0x") or len(self.private_key) < 66:
             self._init_error = "No valid OG private key configured"
-            logger.warning(f"{self._init_error}; mock mode only allowed in dev")
             self._client = None
             self._initialized = True
+            if self.require_verified:
+                logger.error(f"{self._init_error}; fail-closed mode blocks all runs")
+            else:
+                logger.warning(f"{self._init_error}; mock mode (dev only)")
             return
         try:
             import opengradient as og
@@ -317,9 +320,12 @@ class OGExecutionClient:
             logger.info("OpenGradient SDK initialized (live mode)")
         except Exception as e:
             self._init_error = f"OpenGradient SDK init failed: {e}"
-            logger.error(self._init_error)
             self._client = None
             self._initialized = True
+            if self.require_verified:
+                logger.error(self._init_error)
+            else:
+                logger.warning(f"{self._init_error}; falling back to mock (dev only)")
 
     def _ensure_approval(self):
         """One-time Permit2 approval for OPG spending."""
@@ -534,10 +540,10 @@ class OGExecutionClient:
         """Verify run proof by checking the x402 settlement transaction on Base Sepolia.
 
         The OG TEE LLM returns a payment_hash (x402 on-chain receipt on Base Sepolia).
-        We verify this transaction exists and succeeded — TEE hardware guarantees the
-        input/output integrity; the on-chain receipt proves execution was paid for and settled.
-
-        Falls back to trusting TEE attestation when no real tx hash is available.
+        We verify this transaction exists and succeeded on-chain. This is the hard
+        proof — no settlement tx means no proof, period. We do NOT fall back to
+        "trusting TEE attestation" because the entire point is to be independently
+        verifiable by anyone reading the chain.
         """
         self._ensure_init()
 
@@ -551,23 +557,23 @@ class OGExecutionClient:
                 output_hash_match=False,
             )
 
-        # No real settlement hash available — trust TEE attestation
+        # No real settlement hash means no verifiable proof. Fail closed.
         _is_fake = (
             not settlement_tx
             or settlement_tx == "external"
             or len(settlement_tx) != 66  # not a real 0x-prefixed 32-byte hash
         )
         if _is_fake:
-            logger.info(
+            logger.warning(
                 f"Run {run_id}: no on-chain settlement tx ({settlement_tx!r}); "
-                "trusting TEE attestation"
+                "cannot verify — returning invalid"
             )
             return ProofVerification(
-                valid=True,
+                valid=False,
                 settlement_tx=settlement_tx,
                 model_cid=None,
-                input_hash_match=True,
-                output_hash_match=True,
+                input_hash_match=False,
+                output_hash_match=False,
             )
 
         try:

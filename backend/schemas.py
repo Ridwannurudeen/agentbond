@@ -137,6 +137,8 @@ class ExecuteRunResponse(BaseModel):
     reason_codes: list[str] | None
     settlement_tx: str | None
     verified: bool
+    proof_status: str  # "verified" | "unverified" | "failed"
+    policy_hash: str | None
     evidence_hash: str
 
 
@@ -150,6 +152,9 @@ class RunDetailResponse(BaseModel):
     transcript: list | None
     settlement_tx: str | None
     verified: bool
+    proof_status: str
+    policy_hash: str | None
+    model_id: str | None
     policy_verdict: str | None
     reason_codes: list[str] | None
     created_at: str | None
@@ -158,12 +163,15 @@ class RunDetailResponse(BaseModel):
 class ReplayRunResponse(BaseModel):
     run_id: str
     proof_valid: bool
+    proof_status: str
     input_hash_match: bool
     output_hash_match: bool
     policy_verdict: str
     reason_codes: list[str]
     evidence_hash: str
     original_verdict: str | None
+    policy_hash: str | None
+    model_id: str | None
 
 
 class RunListItem(BaseModel):
@@ -172,6 +180,7 @@ class RunListItem(BaseModel):
     agent_id: int
     policy_verdict: str | None
     verified: bool
+    proof_status: str
     settlement_tx: str | None
     created_at: str | None
 

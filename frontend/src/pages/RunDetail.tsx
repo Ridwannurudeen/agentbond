@@ -27,7 +27,7 @@ function InfoRow({ label, children }: { label: string; children: React.ReactNode
 
 export default function RunDetail() {
   const { id } = useParams<{ id: string }>();
-  const { address } = useWallet();
+  const { address, signer } = useWallet();
 
   const [run, setRun] = useState<Run | null>(null);
   const [loading, setLoading] = useState(true);
@@ -64,7 +64,12 @@ export default function RunDetail() {
     e.preventDefault();
     if (!run) return;
     setSubmittingClaim(true); setClaimResult(null); setClaimError(null);
-    try { setClaimResult(await submitClaim(run.run_id, run.agent_id, claimantAddress, reasonCode)); }
+    try {
+      if (!signer) throw new Error("Connect your wallet to submit a claim");
+      const message = `AgentBond claim\nRun: ${run.run_id}\nReason: ${reasonCode}\nClaimant: ${claimantAddress}\nAt: ${Date.now()}`;
+      const signature = await signer.signMessage(message);
+      setClaimResult(await submitClaim(run.run_id, claimantAddress, reasonCode, signature, message));
+    }
     catch (err: unknown) { const e = err as { response?: { data?: { detail?: string } }; message?: string }; setClaimError(e.response?.data?.detail || e.message || "Failed to submit claim"); }
     setSubmittingClaim(false);
   };

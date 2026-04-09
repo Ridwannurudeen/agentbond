@@ -165,15 +165,16 @@ describe("executeRun", () => {
 });
 
 describe("submitClaim", () => {
-  it("POSTs to /claims with correct payload", async () => {
+  it("POSTs to /claims with signature payload", async () => {
     const response = { claim_id: 10, status: "submitted" };
     mockedApi.post.mockResolvedValue({ data: response });
-    const result = await submitClaim("run-1", 2, "0xabc", "POLICY_VIOLATION");
+    const result = await submitClaim("run-1", "0xabc", "POLICY_VIOLATION", "0xsig", "msg");
     expect(mockedApi.post).toHaveBeenCalledWith("/claims", {
       run_id: "run-1",
-      agent_id: 2,
       claimant_address: "0xabc",
       reason_code: "POLICY_VIOLATION",
+      signature: "0xsig",
+      message: "msg",
     });
     expect(result).toEqual(response);
   });

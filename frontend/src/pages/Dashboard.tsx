@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { fetchDashboardStats, fetchAgents, fetchRuns, streamRun } from "../api";
+import { fetchDashboardStats, fetchAgents, fetchRuns, streamRun, generateApiKey } from "../api";
+import { useWallet } from "../context/WalletContext";
 import { CopyButton } from "../components/CopyButton";
 import { Bot, Activity, FileWarning, TrendingUp, ArrowRight, ExternalLink, Play, ChevronDown, CheckCircle2, XCircle } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -101,6 +102,7 @@ const EVENT_COLORS: Record<string, string> = {
 
 // ── Main ─────────────────────────────────────────────────────────────────────
 export default function Dashboard() {
+  const { address, signer } = useWallet();
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [runs, setRuns] = useState<RunListItem[]>([]);
@@ -118,29 +120,52 @@ export default function Dashboard() {
     Promise.all([fetchDashboardStats(), fetchAgents(), fetchRuns()])
       .then(([s, a, r]) => {
         setStats(s); setAgents(a); setRuns(r);
-        const active = a.filter((ag) => ag.status === "active");
+        // Only allow playing agents that the connected wallet owns
+        const owned = address
+          ? a.filter((ag) => ag.operator_wallet?.toLowerCase() === address.toLowerCase())
+          : [];
+        const active = owned.filter((ag) => ag.status === "active");
         if (active.length > 0) setPlayAgentId(String(active[0].id));
-        else if (a.length > 0) setPlayAgentId(String(a[0].id));
+        else if (owned.length > 0) setPlayAgentId(String(owned[0].id));
       })
       .catch((err) => setError(err.response?.data?.detail || err.message || "Failed to load"))
       .finally(() => setLoading(false));
-  }, []);
+  }, [address]);
 
-  const handlePlay = (e: React.FormEvent) => {
+  const handlePlay = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!playAgentId || !playInput.trim()) return;
+    if (!address || !signer) {
+      setPlayError("Connect your wallet to execute a run");
+      return;
+    }
     setPlayRunning(true); setPlayEvents([]); setPlayResult(null); setPlayError(null);
-    streamRun(
-      parseInt(playAgentId),
-      playInput,
-      (event, data) => {
-        setPlayEvents((prev) => [...prev, { event, data }]);
-        if (event === "complete") { setPlayResult(data); fetchRuns().then(setRuns); }
-        if (event === "error") setPlayError(data?.message ?? "Run failed");
-      },
-      () => setPlayRunning(false),
-      (err) => { setPlayError(err); setPlayRunning(false); },
-    );
+    try {
+      // Fetch the operator API key (silent if already cached, signs a message otherwise)
+      const sigForKey = await signer.signMessage("AgentBond API key request");
+      const { api_key } = await generateApiKey(address, sigForKey, "AgentBond API key request");
+
+      // Per-run authorization signature — binds this specific run to the operator wallet
+      const runMessage = `AgentBond run for agent ${playAgentId}\nPrompt: ${playInput}\nAt: ${Date.now()}`;
+      const runSignature = await signer.signMessage(runMessage);
+
+      streamRun(
+        parseInt(playAgentId),
+        playInput,
+        (event, data) => {
+          setPlayEvents((prev) => [...prev, { event, data }]);
+          if (event === "complete") { setPlayResult(data); fetchRuns().then(setRuns); }
+          if (event === "error") setPlayError(data?.message ?? "Run failed");
+        },
+        () => setPlayRunning(false),
+        (err) => { setPlayError(err); setPlayRunning(false); },
+        { apiKey: api_key, signature: runSignature, message: runMessage },
+      );
+    } catch (err: unknown) {
+      const e = err as { message?: string };
+      setPlayError(e.message ?? "Run authorization failed");
+      setPlayRunning(false);
+    }
   };
 
   if (loading)

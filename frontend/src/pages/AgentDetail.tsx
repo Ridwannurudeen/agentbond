@@ -2,8 +2,9 @@ import React, { useEffect, useRef, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import {
   fetchAgent, fetchRuns, fetchClaims, fetchScore, fetchScoreHistory, fetchPolicies,
-  activatePolicy, fetchAgentMemories, streamRun,
+  activatePolicy, fetchAgentMemories, streamRun, generateApiKey,
 } from "../api";
+import { useWallet } from "../context/WalletContext";
 import { CopyButton } from "../components/CopyButton";
 import {
   ChevronLeft, Play, Activity, FileWarning, ShieldCheck, TrendingUp,
@@ -152,6 +153,7 @@ function PolicyRulesChips({ rules }: { rules: PolicyRules }) {
 // ── Main ─────────────────────────────────────────────────────────────────────
 export default function AgentDetail() {
   const { id } = useParams<{ id: string }>();
+  const { address, signer } = useWallet();
   const runFormRef = useRef<HTMLDivElement>(null);
 
   const [agent, setAgent] = useState<Agent | null>(null);
@@ -186,29 +188,46 @@ export default function AgentDetail() {
       .finally(() => setLoading(false));
   }, [id]);
 
-  const handleRun = (e: React.FormEvent) => {
+  const handleRun = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!id) return;
+    if (!address || !signer) {
+      setRunError("Connect your wallet to execute a run");
+      return;
+    }
     setRunning(true); setRunResult(null); setRunError(null); setStreamEvents([]);
     const agentId = parseInt(id);
-    streamRun(
-      agentId, userInput,
-      (event, data) => {
-        setStreamEvents((prev) => [...prev, { event, data }]);
-        if (event === "complete") {
-          setRunResult(data);
-          Promise.all([
-            fetchRuns(agentId), fetchAgent(agentId), fetchAgentMemories(agentId), fetchScoreHistory(agentId),
-          ]).then(([r, a, m, sh]) => {
-            setRuns(r); setAgent(a); setMemories(m);
-            setScoreHistory(Array.isArray(sh) ? sh : []);
-          });
-        }
-        if (event === "error") setRunError(data.message ?? "Run failed");
-      },
-      () => setRunning(false),
-      (err) => { setRunError(err); setRunning(false); },
-    );
+    try {
+      const sigForKey = await signer.signMessage("AgentBond API key request");
+      const { api_key } = await generateApiKey(address, sigForKey, "AgentBond API key request");
+
+      const runMessage = `AgentBond run for agent ${agentId}\nPrompt: ${userInput}\nAt: ${Date.now()}`;
+      const runSignature = await signer.signMessage(runMessage);
+
+      streamRun(
+        agentId, userInput,
+        (event, data) => {
+          setStreamEvents((prev) => [...prev, { event, data }]);
+          if (event === "complete") {
+            setRunResult(data);
+            Promise.all([
+              fetchRuns(agentId), fetchAgent(agentId), fetchAgentMemories(agentId), fetchScoreHistory(agentId),
+            ]).then(([r, a, m, sh]) => {
+              setRuns(r); setAgent(a); setMemories(m);
+              setScoreHistory(Array.isArray(sh) ? sh : []);
+            });
+          }
+          if (event === "error") setRunError(data.message ?? "Run failed");
+        },
+        () => setRunning(false),
+        (err) => { setRunError(err); setRunning(false); },
+        { apiKey: api_key, signature: runSignature, message: runMessage },
+      );
+    } catch (err: unknown) {
+      const e = err as { message?: string };
+      setRunError(e.message ?? "Run authorization failed");
+      setRunning(false);
+    }
   };
 
   const handleActivatePolicy = async (policyId: number) => {

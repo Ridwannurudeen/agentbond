@@ -32,6 +32,8 @@ def mock_run():
     run = MagicMock()
     run.id = 1
     run.agent_id = 1
+    run.proof_status = "verified"  # TEE-attested — required for a claim to stand
+    run.policy_rules_snapshot = {"allowed_tools": ["get_price"]}
     run.transcript_json = [
         {"role": "tool_call", "tool": "hack_system", "args": {}},
     ]
@@ -40,6 +42,8 @@ def mock_run():
 
 @pytest.fixture
 def mock_policy():
+    # Legacy fixture kept for test_rejected_when_no_violation — no longer consulted
+    # by verify_claim (which reads run.policy_rules_snapshot instead).
     policy = MagicMock()
     policy.rules_json = {
         "allowed_tools": ["get_price"],
@@ -85,35 +89,36 @@ class TestVerifyClaim:
         assert result.approved is False
 
     @pytest.mark.asyncio
-    async def test_approved_when_violation_confirmed(self, mock_db, mock_claim, mock_run, mock_policy):
-        # First call returns claim, second returns run
+    async def test_approved_when_violation_confirmed(self, mock_db, mock_claim, mock_run):
+        # verify_claim reads the SNAPSHOTTED policy from the run — no DB policy lookup
         mock_db.get.side_effect = [mock_claim, mock_run]
-
-        # Mock the policy query
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = mock_policy
-        mock_db.execute.return_value = mock_result
-
         result = await verify_claim(mock_db, 1)
         assert result.valid is True
         assert result.approved is True
         assert "confirmed" in result.reason
 
     @pytest.mark.asyncio
-    async def test_rejected_when_no_violation(self, mock_db, mock_claim, mock_policy):
+    async def test_rejected_when_no_violation(self, mock_db, mock_claim):
         # Clean transcript - no violations
-        mock_run = MagicMock()
-        mock_run.transcript_json = [
+        clean_run = MagicMock()
+        clean_run.proof_status = "verified"
+        clean_run.policy_rules_snapshot = {"allowed_tools": ["get_price"]}
+        clean_run.transcript_json = [
             {"role": "tool_call", "tool": "get_price", "args": {}},
         ]
 
-        mock_db.get.side_effect = [mock_claim, mock_run]
-
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = mock_policy
-        mock_db.execute.return_value = mock_result
+        mock_db.get.side_effect = [mock_claim, clean_run]
 
         result = await verify_claim(mock_db, 1)
         assert result.valid is True
         assert result.approved is False
         assert "not found" in result.reason
+
+    @pytest.mark.asyncio
+    async def test_rejected_when_run_unverified(self, mock_db, mock_claim, mock_run):
+        """Unverified runs (mock mode or failed TEE) cannot back a warranty claim."""
+        mock_run.proof_status = "unverified"
+        mock_db.get.side_effect = [mock_claim, mock_run]
+        result = await verify_claim(mock_db, 1)
+        assert result.approved is False
+        assert "not TEE-verified" in result.reason or "insurable" in result.reason

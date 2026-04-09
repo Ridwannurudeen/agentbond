@@ -1,15 +1,11 @@
-"""Objective claim verification against run data and policy."""
+"""Objective claim verification against run data and the snapshotted policy."""
 
-import hashlib
-import json
 import logging
 from dataclasses import dataclass
-from datetime import datetime
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.models.schema import Run, Policy, Claim, Agent, ClaimStatus
+from backend.models.schema import Run, Claim, ClaimStatus
 from backend.services.policy_engine import evaluate_policy
 
 logger = logging.getLogger(__name__)
@@ -33,7 +29,11 @@ class VerificationResult:
 
 
 async def verify_claim(db: AsyncSession, claim_id: int) -> VerificationResult:
-    """Verify a claim by re-evaluating the run against its policy."""
+    """Verify a claim by re-evaluating the run against its ORIGINAL policy snapshot.
+
+    Uses the policy frozen into the run at execution time, not the currently active
+    policy. An operator changing policy after the fact cannot invalidate a valid claim.
+    """
     claim = await db.get(Claim, claim_id)
     if not claim:
         return VerificationResult(False, False, "Claim not found", "")
@@ -49,15 +49,17 @@ async def verify_claim(db: AsyncSession, claim_id: int) -> VerificationResult:
     if not run:
         return VerificationResult(True, False, "Referenced run not found", "")
 
-    # Fetch policy
-    policy_result = await db.execute(
-        select(Policy).where(
-            Policy.agent_id == run.agent_id,
-            Policy.status == "active"
-        ).order_by(Policy.id.desc()).limit(1)
-    )
-    policy = policy_result.scalar_one_or_none()
-    policy_rules = policy.rules_json if policy else {}
+    # Unverified runs (mock or failed TEE) cannot back a warranty claim
+    if run.proof_status != "verified":
+        return VerificationResult(
+            valid=True,
+            approved=False,
+            reason=f"Run is not TEE-verified (proof_status={run.proof_status}); not insurable",
+            evidence_hash="",
+        )
+
+    # Use the SNAPSHOTTED policy frozen at run time — immutable
+    policy_rules = run.policy_rules_snapshot or {}
 
     # Re-evaluate the policy against the run transcript
     run_metadata = {}

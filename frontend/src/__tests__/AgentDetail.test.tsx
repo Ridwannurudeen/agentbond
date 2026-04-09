@@ -16,6 +16,19 @@ vi.mock("../api", () => ({
   fetchAgentMemories: vi.fn(),
   activatePolicy: vi.fn(),
   streamRun: vi.fn(),
+  generateApiKey: vi.fn(),
+}));
+
+// Mock the wallet context so tests have a signing wallet
+vi.mock("../context/WalletContext", () => ({
+  useWallet: () => ({
+    address: "0xabc123",
+    signer: { signMessage: vi.fn().mockResolvedValue("0xsig") },
+    provider: null,
+    chainId: null,
+    connect: vi.fn(),
+    disconnect: vi.fn(),
+  }),
 }));
 
 import {
@@ -27,6 +40,7 @@ import {
   fetchPolicies,
   fetchAgentMemories,
   streamRun,
+  generateApiKey,
 } from "../api";
 
 import AgentDetail from "../pages/AgentDetail";
@@ -90,6 +104,11 @@ beforeEach(() => {
   (fetchPolicies as ReturnType<typeof vi.fn>).mockResolvedValue([]);
   (fetchAgentMemories as ReturnType<typeof vi.fn>).mockResolvedValue([]);
   (streamRun as ReturnType<typeof vi.fn>).mockImplementation(() => {});
+  (generateApiKey as ReturnType<typeof vi.fn>).mockResolvedValue({
+    operator_id: 1,
+    wallet_address: "0xabc123",
+    api_key: "test-key",
+  });
 });
 
 afterEach(() => {
@@ -166,12 +185,16 @@ describe("AgentDetail — SSE streaming run", () => {
     fireEvent.change(textarea, { target: { value: "test query" } });
     fireEvent.submit(textarea.closest("form")!);
 
+    // handleRun is async (signs, generates key, then streams) — wait for streamRun
+    await waitFor(() => expect(streamRun).toHaveBeenCalled());
+
     expect(streamRun).toHaveBeenCalledWith(
       1,
       "test query",
       expect.any(Function),
       expect.any(Function),
       expect.any(Function),
+      expect.objectContaining({ apiKey: "test-key" }),
     );
   });
 
@@ -205,6 +228,8 @@ describe("AgentDetail — SSE streaming run", () => {
     fireEvent.change(textarea, { target: { value: "stream test" } });
     fireEvent.submit(textarea.closest("form")!);
 
+    await waitFor(() => expect(capturedOnEvent).toBeTruthy());
+
     act(() => {
       capturedOnEvent!("memory_loaded", { has_context: false });
     });
@@ -231,6 +256,8 @@ describe("AgentDetail — SSE streaming run", () => {
     const textarea = screen.getByPlaceholderText(/current price of ETH/i);
     fireEvent.change(textarea, { target: { value: "final test" } });
     fireEvent.submit(textarea.closest("form")!);
+
+    await waitFor(() => expect(capturedOnEvent).toBeTruthy());
 
     act(() => {
       capturedOnEvent!("complete", {
@@ -260,6 +287,8 @@ describe("AgentDetail — SSE streaming run", () => {
     const textarea = screen.getByPlaceholderText(/current price of ETH/i);
     fireEvent.change(textarea, { target: { value: "error test" } });
     fireEvent.submit(textarea.closest("form")!);
+
+    await waitFor(() => expect(capturedOnError).toBeTruthy());
 
     act(() => { capturedOnError!("HTTP 500"); });
 

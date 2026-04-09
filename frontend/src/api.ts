@@ -91,15 +91,19 @@ export async function fetchClaims(agentId?: number): Promise<ClaimListItem[]> {
 
 export async function submitClaim(
   runId: string,
-  agentId: number,
   claimantAddress: string,
-  reasonCode: string
+  reasonCode: string,
+  signature: string,
+  message: string,
+  extras?: { chain_claim_id?: number; chain_submit_tx?: string }
 ): Promise<ClaimResult> {
   const { data } = await api.post<ClaimResult>("/claims", {
     run_id: runId,
-    agent_id: agentId,
     claimant_address: claimantAddress,
     reason_code: reasonCode,
+    signature,
+    message,
+    ...extras,
   });
   return data;
 }
@@ -169,14 +173,22 @@ export function streamRun(
   onEvent: (event: string, data: SSEEventData) => void,
   onDone: () => void,
   onError: (err: string) => void,
+  auth?: { apiKey: string; signature: string; message: string },
 ): () => void {
   const baseUrl = import.meta.env.VITE_API_BASE_URL || "/api";
   const url = `${baseUrl}/runs/stream`;
 
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (auth?.apiKey) headers["X-API-Key"] = auth.apiKey;
+
+  const body: Record<string, unknown> = { agent_id: agentId, user_input: userInput };
+  if (auth?.signature) body.signature = auth.signature;
+  if (auth?.message) body.message = auth.message;
+
   fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ agent_id: agentId, user_input: userInput }),
+    headers,
+    body: JSON.stringify(body),
   })
     .then(async (res) => {
       if (!res.ok || !res.body) {

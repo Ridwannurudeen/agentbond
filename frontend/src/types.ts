@@ -29,6 +29,9 @@ export interface RunListItem {
   reason_codes: string[] | null;
   settlement_tx: string | null;
   evidence_hash: string | null;
+  verified?: boolean;
+  /** "verified" = TEE-attested with settlement tx, "unverified" = mock/dev, "failed" = TEE error */
+  proof_status?: "verified" | "unverified" | "failed";
   created_at: string | null;
 }
 
@@ -37,6 +40,9 @@ export interface Run extends RunListItem {
   input_hash: string | null;
   output_hash: string | null;
   transcript: unknown;
+  /** Hash of the policy body frozen at run time */
+  policy_hash?: string | null;
+  model_id?: string | null;
 }
 
 export interface ClaimListItem {
@@ -54,6 +60,9 @@ export interface ClaimResult {
   status: string;
   approved: boolean;
   reason: string;
+  chain_claim_id?: number | null;
+  chain_submit_tx?: string | null;
+  chain_payout_tx?: string | null;
 }
 
 export interface Score {
@@ -124,9 +133,14 @@ export interface SSEEventData {
 
 export interface ReplayResult {
   proof_valid: boolean;
+  proof_status?: string;
   input_hash_match: boolean;
+  output_hash_match?: boolean;
   policy_verdict: string;
   original_verdict: string;
+  policy_hash?: string | null;
+  model_id?: string | null;
+  reason_codes?: string[];
   error?: string;
 }
 

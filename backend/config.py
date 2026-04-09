@@ -9,6 +9,11 @@ class Settings(BaseSettings):
     og_rpc_url: str = "https://ogevmdevnet.opengradient.ai"
     chain_id: int = 10740
 
+    # Trust model: when True, runs that cannot be TEE-attested fail hard instead of
+    # returning mock data. Set to False ONLY in local development.
+    # Default: True (production / fail-closed).
+    require_verified_execution: bool = True
+
     # Contract network (may differ from OG inference network)
     contract_rpc_url: str = "https://sepolia.base.org"
     contract_chain_id: int = 84532

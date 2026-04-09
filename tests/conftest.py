@@ -65,3 +65,43 @@ def mark_test_runs_verified():
 
     with patch.object(_og_module.OGExecutionClient, "_mock_run", _patched_mock_run):
         yield
+
+
+def _find_rate_limit_middleware():
+    """Walk the live FastAPI middleware stack and return the RateLimitMiddleware instance."""
+    from backend.main import app
+    from backend.middleware import RateLimitMiddleware
+    seen = set()
+
+    def _walk(node):
+        if node is None or id(node) in seen:
+            return None
+        seen.add(id(node))
+        if isinstance(node, RateLimitMiddleware):
+            return node
+        inner = getattr(node, "app", None)
+        return _walk(inner)
+
+    # Touch the app so middleware_stack is built
+    _ = app.middleware_stack
+    return _walk(app.middleware_stack)
+
+
+@pytest.fixture(autouse=True)
+def relax_rate_limit_and_reset():
+    """Set extremely high rate limits and clear request history before each test.
+
+    RateLimitMiddleware accumulates timestamps on the shared FastAPI app. Across
+    a full test run we would far exceed the 120 rpm global limit, so late-running
+    tests would start getting 429s — this is exactly what broke CI.
+
+    Instead of disabling the limiter (which would mask real bugs), we bump the
+    limits to a million rpm and clear the request buffer before each test. Tests
+    that want to exercise the real limit can temporarily set their own values.
+    """
+    mw = _find_rate_limit_middleware()
+    if mw is not None:
+        mw.rpm = 10_000_000
+        mw.operator_rpm = 10_000_000
+        mw.requests.clear()
+    yield

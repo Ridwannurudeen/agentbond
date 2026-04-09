@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, Asyn
 
 from backend.db import Base, get_db
 from backend.main import app
+from tests.conftest import _find_rate_limit_middleware
 
 
 TEST_DB_URL = "sqlite+aiosqlite:///test_middleware.db"
@@ -49,25 +50,23 @@ class TestRateLimiting:
 
     @pytest.mark.asyncio
     async def test_rate_limit_enforced(self, client):
-        """Requests over the limit should get 429."""
-        # The app is configured with 120 rpm. Flood it.
-        # We need to clear any existing rate limit state first
-        from backend.middleware import RateLimitMiddleware
+        """Requests over the limit should get 429.
 
-        # Find the rate limit middleware and set a low limit for testing
-        for middleware in app.user_middleware:
-            if middleware.cls is RateLimitMiddleware:
-                break
+        conftest.py relaxes rpm to 10 million so unrelated tests never hit
+        the limit. Here we tighten it back down and flood the endpoint to
+        exercise the limiter end-to-end.
+        """
+        mw = _find_rate_limit_middleware()
+        assert mw is not None, "RateLimitMiddleware not found in app stack"
+        mw.rpm = 120
+        mw.requests.clear()
 
-        # Send enough requests to exceed the 120 rpm limit
         responses = []
-        for i in range(125):
+        for _ in range(125):
             r = await client.get("/api/health")
             responses.append(r.status_code)
 
-        # At least the last few should be 429
         assert 429 in responses
-        # First requests should pass
         assert responses[0] == 200
 
 

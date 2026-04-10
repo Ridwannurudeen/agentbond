@@ -1,6 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
+import Landing from "./pages/Landing";
 import Dashboard from "./pages/Dashboard";
 import AgentDetail from "./pages/AgentDetail";
 import RunDetail from "./pages/RunDetail";
@@ -16,17 +17,16 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <WalletProvider>
       <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-        <Layout>
-          <Routes>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/agents/:id" element={<AgentDetail />} />
-            <Route path="/runs" element={<Runs />} />
-            <Route path="/runs/:id" element={<RunDetail />} />
-            <Route path="/claims" element={<Claims />} />
-            <Route path="/leaderboard" element={<Leaderboard />} />
-            <Route path="/operator" element={<Operator />} />
-          </Routes>
-        </Layout>
+        <Routes>
+          <Route path="/" element={<Landing />} />
+          <Route path="/dashboard" element={<Layout><Dashboard /></Layout>} />
+          <Route path="/agents/:id" element={<Layout><AgentDetail /></Layout>} />
+          <Route path="/runs" element={<Layout><Runs /></Layout>} />
+          <Route path="/runs/:id" element={<Layout><RunDetail /></Layout>} />
+          <Route path="/claims" element={<Layout><Claims /></Layout>} />
+          <Route path="/leaderboard" element={<Layout><Leaderboard /></Layout>} />
+          <Route path="/operator" element={<Layout><Operator /></Layout>} />
+        </Routes>
       </BrowserRouter>
     </WalletProvider>
   </React.StrictMode>

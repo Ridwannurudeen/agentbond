@@ -16,17 +16,23 @@ interface WalletContextValue {
   chainId: number | null;
   isConnecting: boolean;
   signer: JsonRpcSigner | null;
+  wrongChain: boolean;
   connect: () => Promise<void>;
   disconnect: () => void;
+  switchToBaseSepolia: () => Promise<void>;
 }
+
+const BASE_SEPOLIA_CHAIN_ID = 84532;
 
 const WalletContext = createContext<WalletContextValue>({
   address: null,
   chainId: null,
   isConnecting: false,
   signer: null,
+  wrongChain: false,
   connect: async () => {},
   disconnect: () => {},
+  switchToBaseSepolia: async () => {},
 });
 
 export function WalletProvider({ children }: { children: React.ReactNode }) {
@@ -34,6 +40,29 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
   const [chainId, setChainId] = useState<number | null>(null);
   const [isConnecting, setIsConnecting] = useState(false);
   const [signer, setSigner] = useState<JsonRpcSigner | null>(null);
+
+  const switchToBaseSepolia = useCallback(async () => {
+    if (!window.ethereum) return;
+    try {
+      await window.ethereum.request({
+        method: "wallet_switchEthereumChain",
+        params: [{ chainId: "0x14a34" }],
+      });
+    } catch (err: unknown) {
+      if ((err as { code: number }).code === 4902) {
+        await window.ethereum.request({
+          method: "wallet_addEthereumChain",
+          params: [{
+            chainId: "0x14a34",
+            chainName: "Base Sepolia",
+            rpcUrls: ["https://sepolia.base.org"],
+            blockExplorerUrls: ["https://sepolia.basescan.org"],
+            nativeCurrency: { name: "ETH", symbol: "ETH", decimals: 18 },
+          }],
+        });
+      }
+    }
+  }, []);
 
   const connect = useCallback(async () => {
     if (!window.ethereum) {
@@ -47,16 +76,21 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
       if (accounts.length > 0) {
         setAddress(accounts[0]);
         const network = await provider.getNetwork();
-        setChainId(Number(network.chainId));
-        const s = await provider.getSigner();
-        setSigner(s);
+        const currentChainId = Number(network.chainId);
+        setChainId(currentChainId);
+        if (currentChainId !== BASE_SEPOLIA_CHAIN_ID) {
+          await switchToBaseSepolia();
+        } else {
+          const s = await provider.getSigner();
+          setSigner(s);
+        }
       }
     } catch (err) {
       console.error("Wallet connect failed:", err);
     } finally {
       setIsConnecting(false);
     }
-  }, []);
+  }, [switchToBaseSepolia]);
 
   const disconnect = useCallback(() => {
     setAddress(null);
@@ -111,7 +145,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   return (
-    <WalletContext.Provider value={{ address, chainId, isConnecting, signer, connect, disconnect }}>
+    <WalletContext.Provider value={{ address, chainId, isConnecting, signer, wrongChain: chainId !== null && chainId !== BASE_SEPOLIA_CHAIN_ID, connect, disconnect, switchToBaseSepolia }}>
       {children}
     </WalletContext.Provider>
   );

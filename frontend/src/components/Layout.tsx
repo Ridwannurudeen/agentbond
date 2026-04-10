@@ -9,7 +9,6 @@ import {
   Settings,
   Wallet,
   LogOut,
-  Zap,
   Trophy,
   Menu,
   X,
@@ -17,7 +16,7 @@ import {
 import { motion } from "framer-motion";
 
 const navItems = [
-  { path: "/", label: "Dashboard", icon: LayoutDashboard, exact: true },
+  { path: "/dashboard", label: "Dashboard", icon: LayoutDashboard, exact: true },
   { path: "/runs", label: "Runs", icon: Activity, exact: false },
   { path: "/claims", label: "Claims", icon: FileWarning, exact: false },
   { path: "/leaderboard", label: "Leaderboard", icon: Trophy, exact: false },
@@ -30,7 +29,7 @@ function truncateAddress(addr: string) {
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   const location = useLocation();
-  const { address, chainId, isConnecting, connect, disconnect } = useWallet();
+  const { address, chainId, isConnecting, wrongChain, connect, disconnect, switchToBaseSepolia } = useWallet();
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   // Close sidebar on route change
@@ -107,11 +106,24 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         </nav>
 
         {/* Network badge */}
-        {chainId && (
+        {address && wrongChain && (
+          <div className="px-3 py-2">
+            <div className="flex flex-col gap-1.5 px-2.5 py-2 rounded-md bg-red-950/40 border border-red-500/30">
+              <span className="text-[10px] text-red-400 font-medium">Wrong network</span>
+              <button
+                onClick={switchToBaseSepolia}
+                className="text-[10px] font-medium text-red-300 hover:text-red-200 bg-red-500/20 hover:bg-red-500/30 border border-red-500/30 rounded px-2 py-1 cursor-pointer transition-colors"
+              >
+                Switch to Base Sepolia
+              </button>
+            </div>
+          </div>
+        )}
+        {address && !wrongChain && chainId && (
           <div className="px-4 py-2">
             <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-zinc-800/60 border border-zinc-700/50">
-              <Zap size={10} className="text-amber-400" />
-              <span className="text-[10px] text-zinc-500 font-mono">chain:{chainId}</span>
+              <div className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+              <span className="text-[10px] text-zinc-500 font-mono">Base Sepolia</span>
             </div>
           </div>
         )}
